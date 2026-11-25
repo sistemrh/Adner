@@ -373,8 +373,6 @@ function addMsg(text, cls) {
   return div;
 }
 
-if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
-
 function cleanForSpeech(text) {
   return text.replace(/\*\*(.+?)\*\*/g, "$1").replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}•]/gu, "").replace(/\s+/g, " ").trim();
 }
@@ -394,7 +392,38 @@ function playAudio(url) {
   if (p) p.catch(() => { lastSpoken.audioURL = url; showReplay(); });
 }
 
-function browserSpeak(text) {
+const MALE_HINT = /mascul|male|daniel|thiago|ant[oô]nio|ricardo|felipe|pedro|gabriel|andr[eé]|rafael/i;
+
+function systemPtVoices() {
+  if (!("speechSynthesis" in window)) return [];
+  return speechSynthesis.getVoices().filter(v => /^pt/i.test(v.lang.toLowerCase().replace("_", "-")) || v.lang.toLowerCase().startsWith("pt"));
+}
+
+function pickMaleSystemVoice() {
+  const pt = systemPtVoices();
+  return pt.find(v => MALE_HINT.test(v.name)) || null;
+}
+
+function refreshSystemVoices() {
+  const group = document.getElementById("voice-sys-group");
+  if (!group) return;
+  group.innerHTML = "";
+  for (const v of systemPtVoices()) {
+    const o = document.createElement("option");
+    o.value = "nv:" + v.name;
+    o.textContent = `${v.name} (${v.lang})${MALE_HINT.test(v.name) ? " 👨" : ""}`;
+    group.appendChild(o);
+  }
+  const sel = $("voice-select");
+  const saved = localStorage.getItem("adner_voice") || "auto";
+  sel.value = [...sel.options].some(o => o.value === saved) ? saved : "auto";
+}
+if ("speechSynthesis" in window) {
+  speechSynthesis.onvoiceschanged = refreshSystemVoices;
+  refreshSystemVoices();
+}
+
+function browserSpeak(text, voiceObj = null) {
   if (!("speechSynthesis" in window)) {
     $("voice-status").textContent = "voz: não suportada neste navegador — clique em ▶️";
     showReplay();
@@ -405,11 +434,7 @@ function browserSpeak(text) {
   const u = new SpeechSynthesisUtterance(text);
   u.lang = "pt-BR";
   u.rate = 1.02;
-  const voices = speechSynthesis.getVoices();
-  const voice =
-    voices.find(v => /pt[-_]BR/i.test(v.lang) && /mascul|daniel|thiago|ant[oô]nio|ricardo|felipe/i.test(v.name)) ||
-    voices.find(v => /pt[-_]BR/i.test(v.lang)) ||
-    voices.find(v => v.lang.toLowerCase().startsWith("pt"));
+  const voice = voiceObj || systemPtVoices()[0];
   if (voice) u.voice = voice;
   u.onerror = () => { $("voice-status").textContent = "voz: falhou — clique em ▶️ Tocar resposta"; showReplay(); };
   speechSynthesis.speak(u);
@@ -450,17 +475,17 @@ function voiceSpeed() {
 
 const KOKORO_TIMEOUT = 8000;
 
-async function kokoroSpeak(text) {
+async function kokoroSpeak(text, voiceId) {
   const tts = await Promise.race([
     loadKokoro(),
     new Promise((_, rej) => setTimeout(() => rej(new Error("Kokoro demorou para carregar")), KOKORO_TIMEOUT)),
   ]);
   $("voice-status").textContent = "voz: Kokoro 82M (open-source) — gerando…";
-  const audio = await tts.generate(text.slice(0, 600), { voice: localStorage.getItem("adner_voice") || "pm_alex", speed: voiceSpeed() });
+  const audio = await tts.generate(text.slice(0, 600), { voice: voiceId, speed: voiceSpeed() });
   const url = URL.createObjectURL(floatToWavBlob(audio.audio, audio.sampling_rate || 24000));
   lastSpoken.audioURL = url;
   playAudio(url);
-  $("voice-status").textContent = "voz: Kokoro 82M (open-source) ✅";
+  $("voice-status").textContent = `voz: Kokoro ${voiceId} (open-source) ሴ`;
 }
 
 async function speak(text) {
@@ -468,26 +493,45 @@ async function speak(text) {
   const clean = cleanForSpeech(text);
   if (!clean) return;
   lastSpoken = { audioURL: null, text: clean };
-  if ($("voice-engine").value === "kokoro") {
-    try {
-      await kokoroSpeak(clean);
-      return;
-    } catch (err) {
+  const choice = localStorage.getItem("adner_voice") || "auto";
+
+  if (choice.startsWith("kokoro:")) {
+    try { await kokoroSpeak(clean, choice.slice(7)); return; }
+    catch (err) {
       console.warn("Kokoro indisponível:", err);
-      $("voice-status").textContent = KOKORO.tts
-        ? "voz: navegador (Kokoro falhou)"
-        : "voz: navegador (Kokoro ainda não carregou — tente de novo)";
+      $("voice-status").textContent = KOKORO.tts ? "voz: navegador (Kokoro falhou)" : "voz: navegador (Kokoro ainda não carregou — tente de novo)";
+      return browserSpeak(clean);
     }
-  } else $("voice-status").textContent = "voz: navegador";
+  }
+
+  if (choice.startsWith("nv:")) {
+    const v = speechSynthesis.getVoices().find(x => x.name === choice.slice(3));
+    $("voice-status").textContent = `voz: ${v ? v.name : "navegador"}`;
+    return browserSpeak(clean, v || null);
+  }
+
+  const male = pickMaleSystemVoice();
+  if (male) {
+    $("voice-status").textContent = `voz: ${male.name} (masculina, do seu sistema)`;
+    return browserSpeak(clean, male);
+  }
+  try {
+    await kokoroSpeak(clean, "pm_alex");
+    return;
+  } catch (err) {
+    console.warn("Kokoro indisponível:", err);
+    $("voice-status").textContent = "voz: seu sistema sem voz masculina — Kokoro não carregou; usando voz padrão";
+  }
   browserSpeak(clean);
 }
 
-$("voice-engine").value = localStorage.getItem("adner_voice_engine") || "browser";
-$("voice-select").value = localStorage.getItem("adner_voice") || "pm_alex";
+$("voice-select").value = localStorage.getItem("adner_voice") || "auto";
 $("voice-speed").value = localStorage.getItem("adner_speed") || "0.95";
 $("speed-label").textContent = (+$("voice-speed").value).toFixed(2).replace(/0$/, "");
-$("voice-engine").addEventListener("change", () => localStorage.setItem("adner_voice_engine", $("voice-engine").value));
-$("voice-select").addEventListener("change", () => localStorage.setItem("adner_voice", $("voice-select").value));
+$("voice-select").addEventListener("change", () => {
+  localStorage.setItem("adner_voice", $("voice-select").value);
+  speak("Olá! Esta é minha voz agora.");
+});
 $("voice-speed").addEventListener("input", () => {
   $("speed-label").textContent = (+$("voice-speed").value).toFixed(2).replace(/0$/, "");
   localStorage.setItem("adner_speed", $("voice-speed").value);

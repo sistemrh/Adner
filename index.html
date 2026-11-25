@@ -40,14 +40,14 @@
 
     <h2>🔊 Voz</h2>
     <div class="settings">
-      <select id="voice-engine">
-        <option value="browser">Navegador (instantânea) — recomendada</option>
-        <option value="kokoro">Kokoro 82M open-source (experimental)</option>
-      </select>
       <select id="voice-select">
-        <option value="pm_alex">Alex — masculina (recomendada)</option>
-        <option value="pm_santa">Santa — masculina (alternativa)</option>
-        <option value="pf_dora">Dora — feminina</option>
+        <option value="auto">🎯 Masculina automática (recomendada)</option>
+        <optgroup id="voice-sys-group" label="Vozes do seu sistema (pt)"></optgroup>
+        <optgroup label="Kokoro 82M (open-source, local no navegador)">
+          <option value="kokoro:pm_alex">Kokoro Alex — masculina (~90 MB)</option>
+          <option value="kokoro:pm_santa">Kokoro Santa — masculina (~90 MB)</option>
+          <option value="kokoro:pf_dora">Kokoro Dora — feminina (~90 MB)</option>
+        </optgroup>
       </select>
       <label class="chk">Velocidade: <input id="voice-speed" type="range" min="0.8" max="1.2" step="0.05" /> <span id="speed-label">0.95</span></label>
       <button id="test-voice" type="button">🔊 Testar voz</button>
