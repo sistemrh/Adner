@@ -101,33 +101,49 @@ function runTool(name, args) {
   }
 }
 
-function buildSystemPrompt() {
+function buildSystemPrompt(nativeTools = true) {
   const weekdays = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
   const rot = analyzeRoutine();
   const mem = getMemories().slice(0, 10).map(m => `- (${m.count}x) ${m.content}`).join("\n") || "Nada ainda.";
   const evs = futureEvents().slice(0, 10).map(e => `- ${e.event_date}${e.event_time ? " " + e.event_time : ""}${e.repeat === "weekly" ? " (semanal)" : ""}: ${e.title}`).join("\n") || "Nenhum.";
-  return (
+  let prompt =
     `Você é o Adner, um assistente pessoal em português, pró-ativo e objetivo. ` +
     `Hoje é ${weekdays[now.getDay()]}, ${today}\n\n` +
     `== O que você sabe sobre a pessoa ==\n${mem}\n\n` +
     `== Próximos compromissos ==\n${evs}\n\n` +
     `== Rotina detectada ==\n${JSON.stringify({ busiest_weekday: rot.busiest_weekday, peak_hour: rot.peak_hour, recurring: rot.recurring })}\n\n` +
     `REGRAS:\n` +
-    `- Sempre que o usuário pedir para marcar/anotar/agendar algo, USE a ferramenta add_event e confirme.\n` +
-    `- Quando o usuário contar algo pessoal (nome, trabalho, gostos), USE remember_fact.\n` +
-    `- Para perguntas sobre agenda, USE list_events. Para rotina, USE analyze_routine.\n` +
-    `- Responda em no máximo 4 frases, a menos que peçam detalhes. `
-  );
+    `- Sempre que o usuário pedir para marcar/anotar/agendar algo, faça a ação e confirme.\n` +
+    `- Quando o usuário contar algo pessoal (nome, trabalho, gostos), memorize.\n` +
+    `- Responda em no máximo 4 frases, a menos que peçam detalhes. `;
+  if (!nativeTools) {
+    prompt +=
+      `\n\nPROTOCOLO DE AÇÕES (obrigatório):\n` +
+      `Quando precisar agir, responda SOMENTE uma linha JSON válida, sem texto ao redor:\n` +
+      `{"action":"add_event","args":{"title":"...","event_date":"AAAA-MM-DD","event_time":"HH:MM ou null","repeat":"none|weekly"}}\n` +
+      `{"action":"delete_event","args":{"id":NUMERO}}\n` +
+      `{"action":"remember_fact","args":{"fact":"..."}}\n` +
+      `{"action":"forget_fact","args":{"fact":"..."}}\n` +
+      `{"action":"list_events","args":{}}\n` +
+      `{"action":"analyze_routine","args":{}}\n` +
+      `Depois que eu enviar uma mensagem iniciando com TOOL_RESULT, responda ao usuário normalmente.\n` +
+      `Se não precisar agir, apenas responda em texto normal (sem JSON).`;
+  }
+  return prompt;
 }
 
 /* ================= Provedores de IA ================= */
 
-const DEFAULTS = { groq: { model: "llama-3.3-70b-versatile", base: "https://api.groq.com/openai/v1" }, ollama: { model: "llama3.2", base: "http://localhost:11434/v1" } };
+const DEFAULTS = {
+  puter: { model: "gpt-5-nano" },
+  groq: { model: "llama-3.3-70b-versatile", base: "https://api.groq.com/openai/v1" },
+  ollama: { model: "llama3.2", base: "http://localhost:11434/v1" },
+};
 
 function activeProvider() {
-  const p = localStorage.getItem("adner_provider") || "groq";
+  const p = localStorage.getItem("adner_provider") || "puter";
   const key = store.get("adner_key", "");
   const model = localStorage.getItem("adner_model") || DEFAULTS[p].model;
   return { name: p, base: DEFAULTS[p].base, key, model };
@@ -135,7 +151,9 @@ function activeProvider() {
 
 function providerReady() {
   const p = activeProvider();
-  return p.name === "ollama" || !!p.key;
+  if (p.name === "puter") return typeof puter !== "undefined";
+  if (p.name === "ollama") return true;
+  return !!p.key;
 }
 
 async function chatCompletion(messages) {
@@ -150,16 +168,49 @@ async function chatCompletion(messages) {
   return (await res.json()).choices[0].message;
 }
 
+async function puterChat(messages) {
+  if (typeof puter === "undefined") throw new Error("Puter não carregou — verifique a internet");
+  const p = activeProvider();
+  const resp = await puter.ai.chat(messages, { model: p.model, temperature: 0.6 });
+  let content = resp?.message?.content ?? resp;
+  if (Array.isArray(content)) content = content.map(c => (c && c.text) || String(c)).join("");
+  return typeof content === "string" ? content : JSON.stringify(content);
+}
+
+function parseAction(reply) {
+  const m = reply.match(/```json\s*([\s\S]+?)```/) || reply.match(/\{[\s\S]*\}/);
+  if (!m) return null;
+  try {
+    const obj = JSON.parse(m[1] ?? m[0]);
+    if (obj && typeof obj.action === "string") return obj;
+  } catch { /* resposta normal de conversa */ }
+  return null;
+}
+
+function runToolSafe(name, args) {
+  try { return runTool(name, args || {}); }
+  catch (e) { return { error: String(e) }; }
+}
+
 async function agentLoop(conversationHistory) {
-  const messages = [{ role: "system", content: buildSystemPrompt() }, ...conversationHistory];
+  const p = activeProvider();
+  const nativeTools = p.name !== "puter";
+  const messages = [{ role: "system", content: buildSystemPrompt(nativeTools) }, ...conversationHistory];
   for (let i = 0; i < 4; i++) {
+    if (!nativeTools) {
+      const content = await puterChat(messages);
+      const act = parseAction(content);
+      if (!act) return content;
+      messages.push({ role: "assistant", content });
+      const result = runToolSafe(act.action, act.args);
+      messages.push({ role: "user", content: `TOOL_RESULT (do sistema, não do usuário): ${JSON.stringify(result)}` });
+      continue;
+    }
     const msg = await chatCompletion(messages);
     messages.push(msg);
     if (!msg.tool_calls) return msg.content;
     for (const call of msg.tool_calls) {
-      let result;
-      try { result = runTool(call.function.name, JSON.parse(call.function.arguments || "{}")); }
-      catch (e) { result = { error: String(e) }; }
+      const result = runToolSafe(call.function.name, JSON.parse(call.function.arguments || "{}"));
       messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result) });
     }
   }
@@ -388,12 +439,14 @@ $("save-settings").addEventListener("click", () => {
   localStorage.setItem("adner_model", $("model-input").value.trim() || "");
   updateProviderUI();
   $("provider").textContent = providerReady() ? "IA: pronta ✅" : "IA: falta a chave";
+  addMsg("✅ Configuração salva. Pode conversar!", "bot");
 });
 
 $("provider-select").addEventListener("change", () => {
   const p = $("provider-select").value;
   $("api-key").style.display = p === "groq" ? "" : "none";
   $("model-input").placeholder = DEFAULTS[p].model;
+  $("provider-hint").style.display = p === "groq" ? "" : "none";
 });
 
 $("clear-data").addEventListener("click", () => {
@@ -407,9 +460,12 @@ function updateProviderUI() {
   const p = activeProvider();
   $("provider-select").value = p.name;
   $("api-key").style.display = p.name === "groq" ? "" : "none";
+  $("provider-hint").style.display = p.name === "groq" ? "" : "none";
   $("model-input").value = localStorage.getItem("adner_model") || "";
   $("model-input").placeholder = DEFAULTS[p.name].model;
-  $("provider").textContent = providerReady() ? `IA: ${p.model} (${p.name})` : "IA: configure ⚙️";
+  $("provider").textContent = providerReady()
+    ? `IA: ${p.model} (${p.name})`
+    : `IA: ${p.name === "groq" ? "coloque a chave da Groq ⚙️" : "indisponível"}`;
 }
 
 async function refreshSide() {

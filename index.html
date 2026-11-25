@@ -16,13 +16,14 @@
     <h2>⚙️ Configuração da IA</h2>
     <div class="settings">
       <select id="provider-select">
-        <option value="groq">Groq (grátis, nuvem)</option>
-        <option value="ollama">Ollama (open-source, local)</option>
+        <option value="puter">Grátis — sem chave (Puter)</option>
+        <option value="groq">Groq — grátis com chave (melhor qualidade)</option>
+        <option value="ollama">Ollama — open-source local</option>
       </select>
-      <input id="api-key" type="password" placeholder="Chave da Groq (grátis)" />
+      <input id="api-key" type="password" placeholder="Chave da Groq (opcional)" />
       <input id="model-input" placeholder="Modelo" />
       <button id="save-settings" type="button">Salvar</button>
-      <a class="hint" href="https://console.groq.com/keys" target="_blank" rel="noopener">🔑 Criar chave grátis da Groq</a>
+      <a class="hint" id="provider-hint" href="https://console.groq.com/keys" target="_blank" rel="noopener">🔑 Criar chave grátis da Groq</a>
     </div>
 
     <h2>📅 Agenda</h2>
@@ -64,7 +65,7 @@
 
   <main class="chat">
     <div id="messages" class="messages">
-      <div class="msg bot">Olá! Eu sou o <b>Adner</b>, seu assistente pessoal. Falo com você 🔊, anoto seus compromissos quando você pede ("marcar dentista amanhã às 14h"), aprendo sua rotina e memorizo o que me contar. Para conversar de verdade, cole uma chave grátis da Groq nas configurações ⚙️ ao lado.</div>
+      <div class="msg bot">Olá! Eu sou o <b>Adner</b>, seu assistente pessoal — e você já pode conversar comigo agora, <b>sem chave nenhuma</b> 🎉 Falo com você 🔊, anoto compromissos quando você pede ("marcar dentista amanhã às 14h"), aprendo sua rotina e memorizo o que me contar. No primeiro uso da IA, uma janela de login gratuito (Puter) pode aparecer — depois é só usar. Se preferir mais qualidade, use uma chave grátis da Groq nas configurações ⚙️.</div>
     </div>
     <form id="chat-form">
       <button id="mic-btn" type="button" title="Falar com o assistente">🎤</button>
@@ -73,6 +74,7 @@
     </form>
   </main>
 </div>
+<script src="https://js.puter.com/v2/"></script>
 <script src="app.js"></script>
 </body>
 </html>

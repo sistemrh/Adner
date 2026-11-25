@@ -16,10 +16,10 @@ Assistente pessoal que roda **100% estático no GitHub Pages** — sem servidor 
 ## 🚀 Usar
 
 1. Abra a [página da demo](https://sistemrh.github.io/Adner/)
-2. Crie uma chave **gratuita** em [console.groq.com/keys](https://console.groq.com/keys)
-3. Cole a chave em **⚙️ Configuração da IA** e salve — pronto, pode conversar!
+2. **Já funciona sem chave nenhuma** — o padrão é a IA grátis do **Puter.js** (sem API key); no primeiro uso pode aparecer uma janela de login gratuito, é só entrar uma vez
+3. Opcional, para mais qualidade: cola uma chave **gratuita** da [Groq](https://console.groq.com/keys) em **⚙️ Configuração da IA**, ou rode **Ollama** local
 
-Sem chave, ele ainda funciona em **modo offline** com comandos: *"minha agenda"*, *"minha rotina"* e anotações simples como *"marcar dentista amanhã às 14h"*.
+Sem internet/IA disponível, ele ainda funciona em **modo offline** com comandos: *"minha agenda"*, *"minha rotina"* e anotações simples como *"marcar dentista amanhã às 14h"*.
 
 ### Voz open-source no navegador (opcional)
 
