@@ -23,7 +23,7 @@ Sem chave, ele ainda funciona em **modo offline** com comandos: *"minha agenda"*
 
 ### Voz open-source no navegador (opcional)
 
-Em **🔊 Voz**, escolha **Kokoro 82M open-source** e a voz (Dora/Alex/Santa, pt-BR). O modelo (~90 MB) é baixado uma única vez, fica em cache no navegador e toda a síntese acontece localmente na aba — nenhum áudio ou texto sai do seu dispositivo. Se algo falhar, cai automaticamente para a voz nativa do navegador.
+Em **🔊 Voz**, o motor padrão é a rede neural **Kokoro 82M** com a voz masculina **Alex** (pt-BR) — ajuste a velocidade (≈ 0.95 soa mais natural) e use **🔊 Testar voz** para comparar Alex × Santa × Dora. O modelo (~90 MB) é baixado uma única vez, fica em cache no navegador e toda a síntese acontece localmente na aba — nenhum áudio ou texto sai do seu dispositivo. Se algo falhar, cai automaticamente para a voz nativa do navegador.
 
 ### IA 100% open-source (opcional, local)
 

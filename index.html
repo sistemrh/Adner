@@ -44,10 +44,12 @@
         <option value="kokoro">Kokoro 82M open-source (melhor qualidade)</option>
       </select>
       <select id="voice-select">
-        <option value="pf_dora">Dora — feminina (pt-BR)</option>
-        <option value="pm_alex">Alex — masculina (pt-BR)</option>
-        <option value="pm_santa">Santa — masculina (pt-BR)</option>
+        <option value="pm_alex">Alex — masculina (recomendada)</option>
+        <option value="pm_santa">Santa — masculina (alternativa)</option>
+        <option value="pf_dora">Dora — feminina</option>
       </select>
+      <label class="chk">Velocidade: <input id="voice-speed" type="range" min="0.8" max="1.2" step="0.05" /> <span id="speed-label">0.95</span></label>
+      <button id="test-voice" type="button">🔊 Testar voz</button>
     </div>
     <label class="chk"><input id="auto-speak" type="checkbox" checked /> Falar respostas automaticamente</label>
 
