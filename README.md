@@ -1,79 +1,54 @@
-# 🤖 Assistente Pessoal Inteligente
+# 🤖 Adner — Assistente Pessoal Inteligente
 
-Assistente pessoal com **interface web**, que conversa com você em português, **anota sua agenda** e **aprende sua rotina** — usando IA **gratuita/open-source** com fallback em cadeia:
+Assistente pessoal que roda **100% estático no GitHub Pages** — sem servidor e sem custo. Ele conversa com você em português, **anota compromissos sozinho** (agente com *function calling*), **aprende sua rotina** e **fala em voz alta**.
 
-```
-Ollama (local, open-source)  →  Groq (nuvem, plano grátis)  →  Modo offline embutido
-```
+🔗 **Demo:** https://sistemrh.github.io/Adner/
 
-Nunca fica fora do ar: se não houver nenhuma IA configurada, o assistente ainda responde com comandos locais (agenda, rotina, extração de compromissos).
+## ✨ O que ele faz
 
-## ✨ Funcionalidades
+- 💬 **Conversa de verdade** — LLM gratuito (Groq / Llama 3.3 70B) chamado direto do navegador
+- 📅 **Agenda autônoma** — diga *"marcar dentista amanhã às 14h"* e a IA anota sozinha via ferramenta; também sabe listar e remover
+- 🧠 **Memória** — *"meu nome é..."*, *"eu trabalho na..."*, *"eu gosto de..."* ficam memorizados e alimentam as próximas conversas
+- 📊 **Rotina** — analisa seus compromissos e descobre dia mais cheio, horário de pico e atividades recorrentes
+- 🔊 **Fala** suas respostas em português e 🎤 **ouve você** (ditado no Chrome/Edge)
+- 📦 Tudo fica **no seu navegador** (localStorage) — nenhum servidor próprio
 
-- 💬 **Conversa em português** com memória das últimas mensagens
-- 📅 **Agenda automática** — diga "marcar dentista amanhã às 14h" e o compromisso é anotado sozinho
-- 🧠 **Aprende sobre você** — nome, trabalho, gostos (memória persistente em SQLite)
-- 📊 **Análise de rotina** — dia mais movimentado, horário de pico, atividades recorrentes
-- 🌐 **Interface web** em HTML/CSS/JS (sem build, sem dependências de front)
+## 🚀 Usar
 
-## 🚀 Como rodar
+1. Abra a [página da demo](https://sistemrh.github.io/Adner/)
+2. Crie uma chave **gratuita** em [console.groq.com/keys](https://console.groq.com/keys)
+3. Cole a chave em **⚙️ Configuração da IA** e salve — pronto, pode conversar!
 
-```bash
-cd assistente-pessoal
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
-```
+Sem chave, ele ainda funciona em **modo offline** com comandos: *"minha agenda"*, *"minha rotina"* e anotações simples como *"marcar dentista amanhã às 14h"*.
 
-Abra **http://localhost:8000** no navegador.
+### IA 100% open-source (opcional, local)
 
-### Opção A — IA 100% local e open-source (recomendada)
-
-Instale o [Ollama](https://ollama.com) e rode:
+Com o [Ollama](https://ollama.com) rodando na sua máquina, selecione o provedor **Ollama** nas configurações:
 
 ```bash
 ollama pull llama3.2
-ollama serve
+OLLAMA_ORIGINS="https://sistemrh.github.io" ollama serve
 ```
 
-Reinicie o assistente. Pronto — nada sai da sua máquina.
+(Rodando localmente em `http://localhost:8000`? Use `OLLAMA_ORIGINS="*"`.)
 
-### Opção B — Groq grátis (nuvem, muito rápido)
+## 🛠️ Rodando localmente
 
-1. Crie uma chave gratuita em https://console.groq.com/keys
-2. Copie `.env.example` para `.env` e cole sua chave em `GROQ_API_KEY`
+É um site estático puro — nenhum build:
 
-(O assistente usa Ollama quando disponível e cai para Groq automaticamente.)
+```bash
+python3 -m http.server 8000
+# abre http://localhost:8000
+```
 
 ## 🗂️ Estrutura
 
 ```
-app/
-  main.py      API FastAPI + regras do assistente
-  ai.py        Provedores de IA com fallback + extração de compromissos/fatos
-  voice.py     Cliente do Piper TTS (voz open-source local)
-  db.py        SQLite: eventos, memórias e mensagens + análise de rotina
-static/
-  index.html   Interface de conversa e agenda
-  app.js       Lógica do frontend
-  style.css    Estilos
-data/
-  assistente.db  Seus dados (criado automaticamente)
+index.html   Interface (chat + agenda + configurações)
+app.js       Agente: LLM com function calling, agenda, memória, rotina, voz
+style.css    Estilos
 ```
-
-## 🔊 Voz (open-source)
-
-O assistente **fala as respostas em voz alta**. A prioridade é o **[Piper TTS](https://github.com/rhasspy/piper)** — open-source (MIT), rápido e 100% local, com voz em português:
-
-```bash
-pip install piper-tts
-python3 -m piper.http_server -m pt_BR-faber-medium -p 5000
-```
-
-(No primeiro uso a voz `pt_BR-faber-medium` é baixada automaticamente — veja vozes em rhasspy/piper-samples ou HF `rhasspy/piper-voices`.)
-
-Se o Piper não estiver rodando, o front faz **fallback automático** para a voz nativa gratuita do navegador (`speechSynthesis`, com voz pt-BR). Você também pode **falar com ele** pelo botão 🎤 (ditado nativo do navegador, grátis no Chrome/Edge), ou digitar.
 
 ## 🔒 Privacidade
 
-Seus dados ficam no SQLite local (`data/assistente.db`). Com Ollama, nenhuma mensagem sai do seu computador. Com Groq, apenas o texto da mensagem vai para a API deles.
+Compromissos, memórias e conversas ficam **no seu navegador** (localStorage). A chave da Groq também. Apenas o texto necessário da conversa é enviado para a API escolhida (Groq ou Ollama local).

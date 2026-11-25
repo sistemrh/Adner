@@ -3,15 +3,27 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Assistente Pessoal</title>
-<link rel="stylesheet" href="/static/style.css" />
+<title>Adner — Assistente Pessoal</title>
+<link rel="stylesheet" href="style.css" />
 </head>
 <body>
 <div class="layout">
   <aside class="side">
-    <h1>🤖 Assistente</h1>
-    <div id="provider" class="provider">conectando…</div>
-    <div id="voice-status" class="provider">voz: —</div>
+    <h1>🤖 Adner</h1>
+    <div id="provider" class="provider">configure a IA ⚙️</div>
+    <div id="voice-status" class="provider">voz: navegador</div>
+
+    <h2>⚙️ Configuração da IA</h2>
+    <div class="settings">
+      <select id="provider-select">
+        <option value="groq">Groq (grátis, nuvem)</option>
+        <option value="ollama">Ollama (open-source, local)</option>
+      </select>
+      <input id="api-key" type="password" placeholder="Chave da Groq (grátis)" />
+      <input id="model-input" placeholder="Modelo" />
+      <button id="save-settings" type="button">Salvar</button>
+      <a class="hint" href="https://console.groq.com/keys" target="_blank" rel="noopener">🔑 Criar chave grátis da Groq</a>
+    </div>
 
     <h2>📅 Agenda</h2>
     <form id="event-form">
@@ -33,11 +45,13 @@
 
     <h2>🧠 O que eu sei sobre você</h2>
     <div id="memories" class="routine">—</div>
+
+    <button id="clear-data" type="button" class="danger">Apagar meus dados</button>
   </aside>
 
   <main class="chat">
     <div id="messages" class="messages">
-      <div class="msg bot">Oi! Eu sou seu assistente pessoal e falo com você por voz 🔊 Converse comigo, me peça para <b>anotar compromissos</b> (ex.: "marcar dentista amanhã às 14h") e pergunte <b>"minha agenda"</b> ou <b>"minha rotina"</b>. Você também pode falar comigo pelo botão 🎤.</div>
+      <div class="msg bot">Olá! Eu sou o <b>Adner</b>, seu assistente pessoal. Falo com você 🔊, anoto seus compromissos quando você pede ("marcar dentista amanhã às 14h"), aprendo sua rotina e memorizo o que me contar. Para conversar de verdade, cole uma chave grátis da Groq nas configurações ⚙️ ao lado.</div>
     </div>
     <form id="chat-form">
       <button id="mic-btn" type="button" title="Falar com o assistente">🎤</button>
@@ -46,6 +60,6 @@
     </form>
   </main>
 </div>
-<script src="/static/app.js"></script>
+<script src="app.js"></script>
 </body>
 </html>
