@@ -1,6 +1,45 @@
 const $ = (id) => document.getElementById(id);
 const messagesEl = $("messages");
 
+/* ===== Diagnóstico visível: qualquer erro aparece na tela, não só no console ===== */
+
+function showError(msg) {
+  let b = document.querySelector(".err-banner");
+  if (!b) {
+    b = document.createElement("div");
+    b.className = "err-banner";
+    document.body.appendChild(b);
+  }
+  b.textContent = `⚠️ ${msg}`;
+  console.error(msg);
+}
+window.addEventListener("error", (e) => showError(e.message || "erro desconhecido"));
+window.addEventListener("unhandledrejection", (e) => showError("(assíncrono) " + (e.reason?.message || e.reason)));
+
+/* ===== Puter carregado de forma assíncrona — nunca trava a página ===== */
+
+let puterLoading = null;
+function ensurePuter() {
+  if (typeof puter !== "undefined") return Promise.resolve(true);
+  if (!puterLoading) {
+    puterLoading = new Promise((resolve) => {
+      const s = document.createElement("script");
+      s.src = "https://js.puter.com/v2/";
+      s.async = true;
+      s.onload = () => resolve(true);
+      s.onerror = () => resolve(false);
+      setTimeout(() => resolve(typeof puter !== "undefined"), 10000);
+      document.head.appendChild(s);
+    }).catch(() => false);
+  }
+  return puterLoading;
+}
+let puterFailed = false;
+ensurePuter().then((ok) => {
+  puterFailed = !ok;
+  if (typeof updateProviderUI === "function") updateProviderUI();
+});
+
 /* ================= Armazenamento local (funciona no GitHub Pages) ================= */
 
 /* ---------- Supabase: sincronização opcional em nuvem ---------- */
@@ -247,7 +286,10 @@ function activeProvider() {
 
 function providerReady() {
   const p = activeProvider();
-  if (p.name === "puter") return typeof puter !== "undefined";
+  if (p.name === "puter") {
+    if (puterFailed && typeof puter === "undefined") return false;
+    return typeof puter !== "undefined" || puterLoading !== null;
+  }
   if (p.name === "ollama") return true;
   return !!p.key;
 }
@@ -268,7 +310,8 @@ async function chatCompletion(messages) {
 }
 
 async function puterChat(messages) {
-  if (typeof puter === "undefined") throw new Error("Puter não carregou — verifique a internet");
+  await ensurePuter();
+  if (typeof puter === "undefined") throw new Error("Puter não está acessível (CDN bloqueado na sua rede?) — use a chave grátis da Groq nas configurações ⚙️");
   if (!puter.auth.isSignedIn()) {
     try {
       await puter.auth.signIn();
@@ -577,41 +620,47 @@ const history = () => store.get("adner_messages", []).slice(-12);
 
 $("chat-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const input = $("chat-input");
-  const text = input.value.trim();
-  if (!text) return;
-  input.value = "";
-  addMsg(text, "user");
-  const msgs = history();
-  msgs.push({ role: "user", content: text });
+  try {
+    const input = $("chat-input");
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = "";
+    addMsg(text, "user");
+    const msgs = history();
+    msgs.push({ role: "user", content: text });
 
-  const thinking = addMsg("digitando…", "bot");
-  const slowHint = setTimeout(() => {
-    thinking.textContent = "ainda processando… se abriu a janela de login gratuito do Puter, entre nela (ou permita popups). Na 2ª mensagem vai direto.";
-  }, 6000);
-  let reply;
-  if (!providerReady()) {
-    reply = offlineAgent(text);
-  } else {
-    try { reply = (await agentLoop(msgs)) || "…"; }
-    catch (err) { reply = `⚠️ Erro ao falar com a IA: ${err.message}`; }
+    const thinking = addMsg("digitando…", "bot");
+    const slowHint = setTimeout(() => {
+      thinking.textContent = "ainda processando… se abriu a janela de login gratuito do Puter, entre nela (ou permita popups). Na 2ª mensagem vai direto.";
+    }, 6000);
+    let reply;
+    if (!providerReady()) {
+      reply = offlineAgent(text);
+    } else {
+      try { reply = (await agentLoop(msgs)) || "…"; }
+      catch (err) { reply = `⚠️ Erro ao falar com a IA: ${err.message}`; }
+    }
+    clearTimeout(slowHint);
+    msgs.push({ role: "assistant", content: reply });
+    store.set("adner_messages", msgs.slice(-40));
+    supaUpsert("app_messages", [
+      { id: Date.now() - 1, role: "user", content: text },
+      { id: Date.now(), role: "assistant", content: reply },
+    ]);
+
+    thinking.textContent = reply;
+    thinking.innerHTML = thinking.innerHTML.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+    const p = activeProvider();
+    $("provider").textContent = providerReady() ? `IA: ${p.model} (${p.name})` : `IA: offline — configure ⚙️`;
+    speak(reply);
+    refreshSide();
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    if (!providerReady() && /chave/i.test(reply)) $("api-key").focus();
+  } catch (err) {
+    showError("falha no envio: " + err.message);
+    const t = addMsg(`⚠️ Não consegui enviar: ${err.message}`, "bot");
+    void t;
   }
-  clearTimeout(slowHint);
-  msgs.push({ role: "assistant", content: reply });
-  store.set("adner_messages", msgs.slice(-40));
-  supaUpsert("app_messages", [
-    { id: Date.now() - 1, role: "user", content: text },
-    { id: Date.now(), role: "assistant", content: reply },
-  ]);
-
-  thinking.textContent = reply;
-  thinking.innerHTML = thinking.innerHTML.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
-  const p = activeProvider();
-  $("provider").textContent = providerReady() ? `IA: ${p.model} (${p.name})` : `IA: offline — configure ⚙️`;
-  speak(reply);
-  refreshSide();
-  messagesEl.scrollTop = messagesEl.scrollHeight;
-  if (!providerReady() && /chave/i.test(reply)) $("api-key").focus();
 });
 
 $("event-form").addEventListener("submit", (e) => {
@@ -650,14 +699,14 @@ $("clear-data").addEventListener("click", () => {
 
 function updateProviderUI() {
   const p = activeProvider();
+  if (p.name === "puter" && puterFailed && typeof puter === "undefined") {
+    $("provider").textContent = "IA: Puter inacessível — use chave Groq ⚙️ ou Ollama";
+  } else $("provider").textContent = providerReady() ? `IA: ${p.model} (${p.name})` : "IA: configure ⚙️";
   $("provider-select").value = p.name;
   $("api-key").style.display = p.name === "groq" ? "" : "none";
   $("provider-hint").style.display = p.name === "groq" ? "" : "none";
   $("model-input").value = localStorage.getItem("adner_model") || "";
   $("model-input").placeholder = DEFAULTS[p.name].model;
-  $("provider").textContent = providerReady()
-    ? `IA: ${p.model} (${p.name})`
-    : `IA: ${p.name === "groq" ? "coloque a chave da Groq ⚙️" : "indisponível"}`;
 }
 
 async function refreshSide() {
