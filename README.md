@@ -36,6 +36,48 @@ OLLAMA_ORIGINS="https://sistemrh.github.io" ollama serve
 
 (Rodando localmente em `http://localhost:8000`? Use `OLLAMA_ORIGINS="*"`.)
 
+## ☁️ Sincronização com Supabase (opcional)
+
+Por padrão seus dados vivem no navegador. Para sincronizar em vários dispositivos e não perder nunca:
+
+1. Crie um projeto grátis em [supabase.com](https://supabase.com)
+2. No **SQL Editor** do seu projeto, rode o SQL abaixo (cria as tabelas + proteção de privacidade)
+3. No painel do Adner, em **☁️ Supabase**: cole a **URL** e a **anon key** (⚙️ Project Settings → API), clique **1. Conectar projeto**, depois crie uma conta/entre
+
+```sql
+create table if not exists app_events (
+  id bigint primary key,
+  user_id uuid not null default auth.uid(),
+  title text not null,
+  event_date date not null,
+  event_time text,
+  repeat text default 'none',
+  created_at timestamptz default now()
+);
+create table if not exists app_memories (
+  user_id uuid not null,
+  content text not null,
+  count int default 1,
+  updated_at timestamptz default now(),
+  primary key (user_id, content)
+);
+create table if not exists app_messages (
+  id bigint primary key,
+  user_id uuid not null default auth.uid(),
+  role text not null,
+  content text not null,
+  created_at timestamptz default now()
+);
+alter table app_events enable row level security;
+alter table app_memories enable row level security;
+alter table app_messages enable row level security;
+create policy "dono acessa eventos" on app_events for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "dono acessa memorias" on app_memories for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "dono acessa mensagens" on app_messages for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+```
+
+Com RLS ativo, mesmo com a anon key pública, cada usuário só lê/escreve os próprios dados. Sem Supabase configurado, tudo continua 100% no navegador.
+
 ## 🛠️ Rodando localmente
 
 É um site estático puro — nenhum build:

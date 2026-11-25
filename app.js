@@ -3,6 +3,94 @@ const messagesEl = $("messages");
 
 /* ================= Armazenamento local (funciona no GitHub Pages) ================= */
 
+/* ---------- Supabase: sincronização opcional em nuvem ---------- */
+
+const SUPA = { client: null, userId: null };
+
+async function getSupa() {
+  if (SUPA.client) return SUPA.client;
+  const url = localStorage.getItem("adner_supa_url");
+  const key = store.get("adner_supa_key", "");
+  if (!url || !key) return null;
+  const mod = await import("https://esm.sh/@supabase/supabase-js@2");
+  SUPA.client = mod.createClient(url, key);
+  const { data } = await SUPA.client.auth.getSession();
+  SUPA.userId = data?.session?.user?.id || null;
+  return SUPA.client;
+}
+
+async function supaLogged() {
+  const c = await getSupa();
+  if (!c || !SUPA.userId) return null;
+  return c;
+}
+
+async function supaUpsert(table, rows) {
+  const c = await supaLogged();
+  if (!c || !rows.length) return;
+  try {
+    await c.from(table).upsert(rows.map(r => ({ ...r, user_id: SUPA.userId })), { onConflict: "user_id,id" });
+  } catch (e) { console.warn("sync falhou:", e); }
+}
+
+async function supaUpsertKeyed(table, rows, conflict) {
+  const c = await supaLogged();
+  if (!c || !rows.length) return;
+  try {
+    await c.from(table).upsert(rows.map(r => ({ ...r, user_id: SUPA.userId })), { onConflict: conflict });
+  } catch (e) { console.warn("sync falhou:", e); }
+}
+
+async function supaDelete(table, match) {
+  const c = await supaLogged();
+  if (!c) return;
+  try { await c.from(table).delete().match({ ...match, user_id: SUPA.userId }); }
+  catch (e) { console.warn("delete remoto falhou:", e); }
+}
+
+async function supaPullMerge() {
+  const c = await supaLogged();
+  if (!c) return false;
+  try {
+    const uid = SUPA.userId;
+    const { data: evs } = await c.from("app_events").select("*").eq("user_id", uid);
+    if (evs) {
+      const map = new Map(getEvents().map(e => [e.id, e]));
+      for (const e of evs) map.set(e.id, { id: e.id, title: e.title, event_date: e.event_date, event_time: e.event_time, repeat: e.repeat });
+      store.set("adner_events", [...map.values()]);
+    }
+    const { data: mems } = await c.from("app_memories").select("*").eq("user_id", uid);
+    if (mems) {
+      const map = new Map(getMemories().map(m => [m.content.toLowerCase(), m]));
+      for (const m of mems) {
+        const k = m.content.toLowerCase();
+        const ex = map.get(k);
+        if (!ex || (m.count || 1) > ex.count) map.set(k, { content: m.content, count: m.count || 1, updated_at: m.updated_at });
+      }
+      store.set("adner_memories", [...map.values()]);
+    }
+    const { data: msgs } = await c.from("app_messages").select("role,content").eq("user_id", uid).order("id", { ascending: false }).limit(40);
+    if (msgs && msgs.length) store.set("adner_messages", msgs.reverse().map(m => ({ role: m.role, content: m.content })));
+    refreshSide();
+    return true;
+  } catch (e) {
+    console.warn("pull falhou:", e);
+    return false;
+  }
+}
+
+async function initSupa() {
+  const status = $("supa-status");
+  if (!localStorage.getItem("adner_supa_url")) return;
+  status.textContent = "conectando…";
+  const c = await getSupa();
+  if (!c) { status.textContent = "não conectado (verifique URL/anon key)"; return; }
+  if (SUPA.userId) {
+    const ok = await supaPullMerge();
+    status.textContent = ok ? "☁️ sincronizado" : "☁️ conectado (falha ao sincronizar — rode o SQL do README no projeto)";
+  } else status.textContent = "projeto conectado — entre com seu e-mail";
+}
+
 const store = {
   get(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } },
   set(key, value) { localStorage.setItem(key, JSON.stringify(value)); },
@@ -13,17 +101,20 @@ const getMemories = () => store.get("adner_memories", []);
 
 function addEvent({ title, event_date, event_time = null, repeat = "none" }) {
   if (!title || !/^\d{4}-\d{2}-\d{2}$/.test(event_date)) return { error: "title e event_date (AAAA-MM-DD) são obrigatórios" };
-  const ev = { id: Date.now(), title, event_date, event_time, repeat: repeat === "weekly" ? "weekly" : "none" };
+  const ev = { id: Date.now(), title, event_date, event_time, repeat: repeat === "weekly" ? "weekly" : "none", created_at: new Date().toISOString() };
   store.set("adner_events", [...getEvents(), ev]);
+  supaUpsert("app_events", [ev]);
   refreshSide();
   return { ok: true, event: ev };
 }
 
 function deleteEvent(id) {
   const remaining = getEvents().filter(e => e.id !== Number(id));
+  const deleted = remaining.length !== getEvents().length;
   store.set("adner_events", remaining);
+  if (deleted) supaDelete("app_events", { id: Number(id) });
   refreshSide();
-  return { ok: remaining.length !== getEvents().length };
+  return { ok: deleted };
 }
 
 function futureEvents() {
@@ -36,17 +127,22 @@ function futureEvents() {
 function rememberFact(fact) {
   if (!fact || typeof fact !== "string" || fact.trim().length < 2) return { error: "fact inválido" };
   const memories = getMemories();
-  const found = memories.find(m => m.content.toLowerCase() === fact.trim().toLowerCase());
-  if (found) { found.count += 1; found.updated_at = new Date().toISOString(); }
-  else memories.push({ content: fact.trim(), count: 1, updated_at: new Date().toISOString() });
+  const target = fact.trim();
+  const found = memories.find(m => m.content.toLowerCase() === target.toLowerCase());
+  let saved;
+  if (found) { found.count += 1; found.updated_at = new Date().toISOString(); saved = found; }
+  else { saved = { content: target, count: 1, updated_at: new Date().toISOString() }; memories.push(saved); }
   store.set("adner_memories", memories);
+  supaUpsertKeyed("app_memories", [{ ...saved }], "user_id,content");
   refreshSide();
   return { ok: true };
 }
 
 function forgetFact(fact) {
-  const memories = getMemories().filter(m => m.content.toLowerCase() !== String(fact).toLowerCase());
+  const target = String(fact).toLowerCase();
+  const memories = getMemories().filter(m => m.content.toLowerCase() !== target);
   store.set("adner_memories", memories);
+  supaDelete("app_memories", { content: fact });
   refreshSide();
   return { ok: true };
 }
@@ -411,6 +507,10 @@ $("chat-form").addEventListener("submit", async (e) => {
   }
   msgs.push({ role: "assistant", content: reply });
   store.set("adner_messages", msgs.slice(-40));
+  supaUpsert("app_messages", [
+    { id: Date.now() - 1, role: "user", content: text },
+    { id: Date.now(), role: "assistant", content: reply },
+  ]);
 
   thinking.textContent = reply;
   thinking.innerHTML = thinking.innerHTML.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
@@ -495,5 +595,43 @@ async function refreshSide() {
   $("memories").textContent = mems.length ? mems.map(m => `${m.content} (${m.count}x)`).join("\n") : "Ainda não aprendi nada sobre você.";
 }
 
+$("supa-connect").addEventListener("click", () => {
+  const url = $("supa-url").value.trim().replace(/\/$/, "");
+  const key = $("supa-key").value.trim();
+  if (!/^https:\/\/.+supabase\.(co|in)/.test(url) || !key) {
+    $("supa-status").textContent = "informe a URL do projeto e a anon key";
+    return;
+  }
+  localStorage.setItem("adner_supa_url", url);
+  store.set("adner_supa_key", key);
+  SUPA.client = null; SUPA.userId = null;
+  initSupa();
+});
+
+$("supa-signin").addEventListener("click", async () => {
+  const c = await getSupa();
+  if (!c) { $("supa-status").textContent = "conecte o projeto primeiro (passo 1)"; return; }
+  const { error } = await c.auth.signInWithPassword({ email: $("supa-email").value.trim(), password: $("supa-pass").value });
+  if (error) { $("supa-status").textContent = "erro no login: " + error.message; return; }
+  SUPA.userId = (await c.auth.getUser()).data?.user?.id;
+  const ok = await supaPullMerge();
+  $("supa-status").textContent = ok ? "☁️ sincronizado" : "☁️ logado (rode o SQL do README no seu projeto)";
+});
+
+$("supa-signup").addEventListener("click", async () => {
+  const c = await getSupa();
+  if (!c) { $("supa-status").textContent = "conecte o projeto primeiro (passo 1)"; return; }
+  const { error } = await c.auth.signUp({ email: $("supa-email").value.trim(), password: $("supa-pass").value });
+  $("supa-status").textContent = error ? "erro: " + error.message : "conta criada! Confirme o e-mail (se pedido) e faça o 2. Entrar";
+});
+
+$("supa-signout").addEventListener("click", async () => {
+  const c = await getSupa();
+  if (c) await c.auth.signOut();
+  SUPA.userId = null;
+  $("supa-status").textContent = "desconectado (dados locais mantidos)";
+});
+
+initSupa();
 updateProviderUI();
 refreshSide();
