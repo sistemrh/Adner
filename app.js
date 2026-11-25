@@ -252,12 +252,15 @@ function providerReady() {
   return !!p.key;
 }
 
+const IA_TIMEOUT = 45000;
+
 async function chatCompletion(messages) {
   const p = activeProvider();
   const headers = { "Content-Type": "application/json" };
   if (p.key) headers.Authorization = `Bearer ${p.key}`;
   const res = await fetch(`${p.base}/chat/completions`, {
     method: "POST", headers,
+    signal: AbortSignal.timeout(IA_TIMEOUT),
     body: JSON.stringify({ model: p.model, messages, tools: TOOLS, tool_choice: "auto", temperature: 0.6 }),
   });
   if (!res.ok) throw new Error(`IA respondeu ${res.status}: ${(await res.text()).slice(0, 200)}`);
@@ -266,8 +269,18 @@ async function chatCompletion(messages) {
 
 async function puterChat(messages) {
   if (typeof puter === "undefined") throw new Error("Puter não carregou — verifique a internet");
+  if (!puter.auth.isSignedIn()) {
+    try {
+      await puter.auth.signIn();
+    } catch {
+      throw new Error("Janela de login gratuito do Puter cancelada ou bloqueada. Permita popups neste site e envie a mensagem de novo (é 1x só). Ou use uma chave grátis da Groq nas configurações ⚙️.");
+    }
+  }
   const p = activeProvider();
-  const resp = await puter.ai.chat(messages, { model: p.model, temperature: 0.6 });
+  const resp = await Promise.race([
+    puter.ai.chat(messages, { model: p.model, temperature: 0.6 }),
+    new Promise((_, rej) => setTimeout(() => rej(new Error("IA demorou demais (>45s) — tente enviar de novo")), IA_TIMEOUT)),
+  ]);
   let content = resp?.message?.content ?? resp;
   if (Array.isArray(content)) content = content.map(c => (c && c.text) || String(c)).join("");
   return typeof content === "string" ? content : JSON.stringify(content);
@@ -573,6 +586,9 @@ $("chat-form").addEventListener("submit", async (e) => {
   msgs.push({ role: "user", content: text });
 
   const thinking = addMsg("digitando…", "bot");
+  const slowHint = setTimeout(() => {
+    thinking.textContent = "ainda processando… se abriu a janela de login gratuito do Puter, entre nela (ou permita popups). Na 2ª mensagem vai direto.";
+  }, 6000);
   let reply;
   if (!providerReady()) {
     reply = offlineAgent(text);
@@ -580,6 +596,7 @@ $("chat-form").addEventListener("submit", async (e) => {
     try { reply = (await agentLoop(msgs)) || "…"; }
     catch (err) { reply = `⚠️ Erro ao falar com a IA: ${err.message}`; }
   }
+  clearTimeout(slowHint);
   msgs.push({ role: "assistant", content: reply });
   store.set("adner_messages", msgs.slice(-40));
   supaUpsert("app_messages", [
