@@ -379,14 +379,39 @@ function cleanForSpeech(text) {
   return text.replace(/\*\*(.+?)\*\*/g, "$1").replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}•]/gu, "").replace(/\s+/g, " ").trim();
 }
 
+let lastSpoken = { audioURL: null, text: "" };
+function showReplay() { $("replay-btn").hidden = false; }
+
+$("replay-btn").addEventListener("click", () => {
+  $("replay-btn").hidden = true;
+  if (lastSpoken.audioURL) { playAudio(lastSpoken.audioURL); return; }
+  if (lastSpoken.text) browserSpeak(lastSpoken.text);
+});
+
+function playAudio(url) {
+  const a = new Audio(url);
+  const p = a.play();
+  if (p) p.catch(() => { lastSpoken.audioURL = url; showReplay(); });
+}
+
 function browserSpeak(text) {
-  if (!("speechSynthesis" in window)) return;
+  if (!("speechSynthesis" in window)) {
+    $("voice-status").textContent = "voz: não suportada neste navegador — clique em ▶️";
+    showReplay();
+    return;
+  }
   speechSynthesis.cancel();
+  speechSynthesis.resume();
   const u = new SpeechSynthesisUtterance(text);
   u.lang = "pt-BR";
   u.rate = 1.02;
-  const voice = speechSynthesis.getVoices().find(v => v.lang.toLowerCase().startsWith("pt"));
+  const voices = speechSynthesis.getVoices();
+  const voice =
+    voices.find(v => /pt[-_]BR/i.test(v.lang) && /mascul|daniel|thiago|ant[oô]nio|ricardo|felipe/i.test(v.name)) ||
+    voices.find(v => /pt[-_]BR/i.test(v.lang)) ||
+    voices.find(v => v.lang.toLowerCase().startsWith("pt"));
   if (voice) u.voice = voice;
+  u.onerror = () => { $("voice-status").textContent = "voz: falhou — clique em ▶️ Tocar resposta"; showReplay(); };
   speechSynthesis.speak(u);
 }
 
@@ -423,12 +448,18 @@ function voiceSpeed() {
   return parseFloat($("voice-speed").value || "0.95");
 }
 
+const KOKORO_TIMEOUT = 8000;
+
 async function kokoroSpeak(text) {
-  const tts = await loadKokoro();
+  const tts = await Promise.race([
+    loadKokoro(),
+    new Promise((_, rej) => setTimeout(() => rej(new Error("Kokoro demorou para carregar")), KOKORO_TIMEOUT)),
+  ]);
   $("voice-status").textContent = "voz: Kokoro 82M (open-source) — gerando…";
   const audio = await tts.generate(text.slice(0, 600), { voice: localStorage.getItem("adner_voice") || "pm_alex", speed: voiceSpeed() });
-  const blob = floatToWavBlob(audio.audio, audio.sampling_rate || 24000);
-  new Audio(URL.createObjectURL(blob)).play();
+  const url = URL.createObjectURL(floatToWavBlob(audio.audio, audio.sampling_rate || 24000));
+  lastSpoken.audioURL = url;
+  playAudio(url);
   $("voice-status").textContent = "voz: Kokoro 82M (open-source) ✅";
 }
 
@@ -436,17 +467,22 @@ async function speak(text) {
   if (!$("auto-speak").checked) return;
   const clean = cleanForSpeech(text);
   if (!clean) return;
+  lastSpoken = { audioURL: null, text: clean };
   if ($("voice-engine").value === "kokoro") {
-    try { await kokoroSpeak(clean); return; }
-    catch (err) {
-      console.warn("Kokoro falhou, usando voz do navegador:", err);
-      $("voice-status").textContent = "voz: navegador (Kokoro indisponível)";
+    try {
+      await kokoroSpeak(clean);
+      return;
+    } catch (err) {
+      console.warn("Kokoro indisponível:", err);
+      $("voice-status").textContent = KOKORO.tts
+        ? "voz: navegador (Kokoro falhou)"
+        : "voz: navegador (Kokoro ainda não carregou — tente de novo)";
     }
   } else $("voice-status").textContent = "voz: navegador";
   browserSpeak(clean);
 }
 
-$("voice-engine").value = localStorage.getItem("adner_voice_engine") || "kokoro";
+$("voice-engine").value = localStorage.getItem("adner_voice_engine") || "browser";
 $("voice-select").value = localStorage.getItem("adner_voice") || "pm_alex";
 $("voice-speed").value = localStorage.getItem("adner_speed") || "0.95";
 $("speed-label").textContent = (+$("voice-speed").value).toFixed(2).replace(/0$/, "");
@@ -460,12 +496,7 @@ $("test-voice").addEventListener("click", async () => {
   if (!$("auto-speak").checked) { $("auto-speak").checked = true; }
   const btn = $("test-voice");
   btn.disabled = true;
-  try { await kokoroSpeak("Olá! Eu sou o Adner, seu assistente pessoal."); }
-  catch (err) {
-    console.warn(err);
-    browserSpeak("Olá! Eu sou o Adner, seu assistente pessoal.");
-    $("voice-status").textContent = "voz: navegador (Kokoro indisponível)";
-  }
+  await speak("Olá! Eu sou o Adner, seu assistente pessoal. Estou falando com você.");
   btn.disabled = false;
 });
 
