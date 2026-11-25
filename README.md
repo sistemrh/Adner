@@ -10,7 +10,7 @@ Assistente pessoal que roda **100% estático no GitHub Pages** — sem servidor 
 - 📅 **Agenda autônoma** — diga *"marcar dentista amanhã às 14h"* e a IA anota sozinha via ferramenta; também sabe listar e remover
 - 🧠 **Memória** — *"meu nome é..."*, *"eu trabalho na..."*, *"eu gosto de..."* ficam memorizados e alimentam as próximas conversas
 - 📊 **Rotina** — analisa seus compromissos e descobre dia mais cheio, horário de pico e atividades recorrentes
-- 🔊 **Fala** suas respostas em português e 🎤 **ouve você** (ditado no Chrome/Edge)
+- 🔊 **Voz open-source**: opcionalmente roda a rede neural **[Kokoro 82M](https://huggingface.co/hexgrad/Kokoro-82M)** (Apache 2.0) direto no navegador (WebGPU/WASM), com vozes brasileiras **Dora, Alex e Santa** — conta também com 🎤 ditado no Chrome/Edge
 - 📦 Tudo fica **no seu navegador** (localStorage) — nenhum servidor próprio
 
 ## 🚀 Usar
@@ -20,6 +20,10 @@ Assistente pessoal que roda **100% estático no GitHub Pages** — sem servidor 
 3. Cole a chave em **⚙️ Configuração da IA** e salve — pronto, pode conversar!
 
 Sem chave, ele ainda funciona em **modo offline** com comandos: *"minha agenda"*, *"minha rotina"* e anotações simples como *"marcar dentista amanhã às 14h"*.
+
+### Voz open-source no navegador (opcional)
+
+Em **🔊 Voz**, escolha **Kokoro 82M open-source** e a voz (Dora/Alex/Santa, pt-BR). O modelo (~90 MB) é baixado uma única vez, fica em cache no navegador e toda a síntese acontece localmente na aba — nenhum áudio ou texto sai do seu dispositivo. Se algo falhar, cai automaticamente para a voz nativa do navegador.
 
 ### IA 100% open-source (opcional, local)
 

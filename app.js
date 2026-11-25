@@ -226,7 +226,6 @@ function addMsg(text, cls) {
   return div;
 }
 
-let piperAvailable = true;
 if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
 
 function cleanForSpeech(text) {
@@ -244,19 +243,62 @@ function browserSpeak(text) {
   speechSynthesis.speak(u);
 }
 
-function speak(text) {
+/* ---------- Kokoro 82M: TTS open-source (Apache-2.0) rodando no navegador ---------- */
+
+const KOKORO = { model: "onnx-community/Kokoro-82M-v1.0-ONNX", tts: null, loading: null };
+
+async function loadKokoro() {
+  if (KOKORO.tts) return KOKORO.tts;
+  if (!KOKORO.loading) {
+    KOKORO.loading = (async () => {
+      $("voice-status").textContent = "voz: baixando Kokoro 82M (~90 MB, só na 1ª vez)…";
+      const mod = await import("https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/dist/kokoro.web.js");
+      const device = navigator.gpu ? "webgpu" : "wasm";
+      KOKORO.tts = await mod.KokoroTTS.from_pretrained(KOKORO.model, { dtype: "q8", device });
+      return KOKORO.tts;
+    })().catch(err => { KOKORO.loading = null; throw err; });
+  }
+  return KOKORO.loading;
+}
+
+function floatToWavBlob(f32, sampleRate = 24000) {
+  const n = f32.length, buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+  const ws = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  ws(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); ws(8, "WAVE"); ws(12, "fmt ");
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, sampleRate, true); v.setUint32(28, sampleRate * 2, true);
+  v.setUint16(32, 2, true); v.setUint16(34, 16, true); ws(36, "data"); v.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) { const s = Math.max(-1, Math.min(1, f32[i])); v.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true); }
+  return new Blob([buf], { type: "audio/wav" });
+}
+
+async function kokoroSpeak(text) {
+  const tts = await loadKokoro();
+  $("voice-status").textContent = "voz: Kokoro 82M (open-source) — gerando…";
+  const audio = await tts.generate(text.slice(0, 600), { voice: localStorage.getItem("adner_voice") || "pf_dora", speed: 1.0 });
+  const blob = floatToWavBlob(audio.audio, audio.sampling_rate || 24000);
+  new Audio(URL.createObjectURL(blob)).play();
+  $("voice-status").textContent = "voz: Kokoro 82M (open-source) ✅";
+}
+
+async function speak(text) {
   if (!$("auto-speak").checked) return;
   const clean = cleanForSpeech(text);
-  if (piperAvailable) {
-    fetch(`/api/tts?text=${encodeURIComponent(clean)}`)
-      .then(res => {
-        if (!res.ok) throw 0;
-        new Audio(URL.createObjectURL(res.blob())).play();
-        $("voice-status").textContent = "voz: Piper (open-source, local)";
-      })
-      .catch(() => { piperAvailable = false; browserSpeak(clean); $("voice-status").textContent = "voz: navegador"; });
-  } else browserSpeak(clean);
+  if (!clean) return;
+  if ($("voice-engine").value === "kokoro") {
+    try { await kokoroSpeak(clean); return; }
+    catch (err) {
+      console.warn("Kokoro falhou, usando voz do navegador:", err);
+      $("voice-status").textContent = "voz: navegador (Kokoro indisponível)";
+    }
+  } else $("voice-status").textContent = "voz: navegador";
+  browserSpeak(clean);
 }
+
+$("voice-engine").value = localStorage.getItem("adner_voice_engine") || "browser";
+$("voice-select").value = localStorage.getItem("adner_voice") || "pf_dora";
+$("voice-engine").addEventListener("change", () => localStorage.setItem("adner_voice_engine", $("voice-engine").value));
+$("voice-select").addEventListener("change", () => localStorage.setItem("adner_voice", $("voice-select").value));
 
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null;
