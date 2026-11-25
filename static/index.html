@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Assistente Pessoal</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+<div class="layout">
+  <aside class="side">
+    <h1>🤖 Assistente</h1>
+    <div id="provider" class="provider">conectando…</div>
+    <div id="voice-status" class="provider">voz: —</div>
+
+    <h2>📅 Agenda</h2>
+    <form id="event-form">
+      <input id="ev-title" placeholder="Título" required />
+      <div class="row">
+        <input id="ev-date" type="date" required />
+        <input id="ev-time" type="time" />
+      </div>
+      <label class="chk"><input id="ev-repeat" type="checkbox" /> Repetir toda semana</label>
+      <button type="submit">Adicionar</button>
+    </form>
+    <ul id="events"></ul>
+
+    <h2>🔊 Voz</h2>
+    <label class="chk"><input id="auto-speak" type="checkbox" checked /> Falar respostas automaticamente</label>
+
+    <h2>📊 Rotina aprendida</h2>
+    <div id="routine" class="routine">—</div>
+
+    <h2>🧠 O que eu sei sobre você</h2>
+    <div id="memories" class="routine">—</div>
+  </aside>
+
+  <main class="chat">
+    <div id="messages" class="messages">
+      <div class="msg bot">Oi! Eu sou seu assistente pessoal e falo com você por voz 🔊 Converse comigo, me peça para <b>anotar compromissos</b> (ex.: "marcar dentista amanhã às 14h") e pergunte <b>"minha agenda"</b> ou <b>"minha rotina"</b>. Você também pode falar comigo pelo botão 🎤.</div>
+    </div>
+    <form id="chat-form">
+      <button id="mic-btn" type="button" title="Falar com o assistente">🎤</button>
+      <input id="chat-input" placeholder="Digite sua mensagem…" autocomplete="off" autofocus />
+      <button type="submit">Enviar ➤</button>
+    </form>
+  </main>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>
