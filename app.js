@@ -16,6 +16,32 @@ function showError(msg) {
 window.addEventListener("error", (e) => showError(e.message || "erro desconhecido"));
 window.addEventListener("unhandledrejection", (e) => showError("(assíncrono) " + (e.reason?.message || e.reason)));
 
+/* ===== App instalável (PWA): roda no celular como aplicativo ===== */
+
+if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+}
+
+let installEvent = null;
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  installEvent = e;
+  $("install-btn").hidden = false;
+});
+$("install-btn").addEventListener("click", async () => {
+  if (installEvent) {
+    installEvent.prompt();
+    installEvent = null;
+    $("install-btn").hidden = true;
+    return;
+  }
+  if (/iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+    alert("No iPhone/iPad: toque no botão Compartilhar (□↑) na barra do navegador e escolha 'Adicionar à Tela de Início'.");
+  } else {
+    alert("No Android: abra o menu do navegador (⋮) e escolha 'Instalar aplicativo' ou 'Adicionar à tela inicial'.");
+  }
+});
+
 /* ===== Puter carregado de forma assíncrona — nunca trava a página ===== */
 
 let puterLoading = null;
