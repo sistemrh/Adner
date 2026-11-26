@@ -565,6 +565,29 @@ function voiceSpeed() {
   return parseFloat($("voice-speed").value || "0.95");
 }
 
+/* ---------- Piper/VITS: segundo motor de voz masculina open source (Faber, pt-BR, MIT) ---------- */
+
+const VITS = { lib: null };
+
+async function vitsSpeak(text) {
+  const id = "pt_BR-faber-medium";
+  if (!VITS.lib) {
+    VITS.lib = await import("https://cdn.jsdelivr.net/npm/@diffusionstudio/vits-web@1.0.3/dist/vits-web.js");
+  }
+  const lib = VITS.lib;
+  const stored = await lib.stored().catch(() => []);
+  if (!stored.includes(id)) {
+    $("voice-status").textContent = "voz: baixando Faber (masculina, ~63 MB, só uma vez)…";
+    await lib.download(id, () => {});
+  }
+  $("voice-status").textContent = "voz: Faber (masculina, open source) — gerando…";
+  const wav = await lib.predict({ text: text.slice(0, 500), voiceId: id });
+  const url = URL.createObjectURL(wav);
+  lastSpoken.audioURL = url;
+  playAudio(url);
+  $("voice-status").textContent = "voz: Faber (masculina, open source) ✅";
+}
+
 async function kokoroSpeak(text, voiceId) {
   const tts = await loadKokoro();
   $("voice-status").textContent = "voz: Kokoro 82M (open-source) — gerando…";
@@ -607,7 +630,14 @@ async function speak(text) {
     return;
   } catch (err) {
     console.warn("Kokoro indisponível:", err);
-    $("voice-status").textContent = "voz: não consegui baixar a voz masculina (sem internet?) — vozes do sistema também não têm homem";
+  }
+  try {
+    await vitsSpeak(clean);
+    return;
+  } catch (err) {
+    console.warn("Piper indisponível:", err);
+    showError("Voz masculina falhou (Alex e Faber): " + (err?.message || err) + " — confira a internet/Wi-Fi");
+    $("voice-status").textContent = "voz masculina falhou — usando voz temporária do navegador";
   }
   browserSpeak(clean);
 }
