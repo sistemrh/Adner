@@ -1,4 +1,4 @@
-const CACHE = "adner-v2";
+const CACHE = "adner-v3";
 const ASSETS = [
   "./",
   "index.html",

@@ -530,11 +530,21 @@ async function loadKokoro() {
   if (KOKORO.tts) return KOKORO.tts;
   if (!KOKORO.loading) {
     KOKORO.loading = (async () => {
-      $("voice-status").textContent = "voz: baixando Kokoro 82M (~90 MB, só na 1ª vez)…";
-      const mod = await import("https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/dist/kokoro.web.js");
-      const device = navigator.gpu ? "webgpu" : "wasm";
-      KOKORO.tts = await mod.KokoroTTS.from_pretrained(KOKORO.model, { dtype: "q8", device });
-      return KOKORO.tts;
+      const t0 = Date.now();
+      $("voice-status").textContent = "voz: baixando Alex (masculina, open source, ~90 MB — só esta 1ª vez; no Wi-Fi é rápido)…";
+      const iv = setInterval(() => {
+        const s = Math.round((Date.now() - t0) / 1000);
+        if (s > 2) $("voice-status").textContent = `voz: baixando Alex (masculina)… ${s}s — só esta 1ª vez (~90 MB)`;
+      }, 1000);
+      try {
+        const mod = await import("https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/dist/kokoro.web.js");
+        const device = navigator.gpu ? "webgpu" : "wasm";
+        KOKORO.tts = await mod.KokoroTTS.from_pretrained(KOKORO.model, { dtype: "q8", device });
+        $("voice-status").textContent = "voz: Alex (masculina, open source) ✅";
+        return KOKORO.tts;
+      } finally {
+        clearInterval(iv);
+      }
     })().catch(err => { KOKORO.loading = null; throw err; });
   }
   return KOKORO.loading;
@@ -555,13 +565,8 @@ function voiceSpeed() {
   return parseFloat($("voice-speed").value || "0.95");
 }
 
-const KOKORO_TIMEOUT = 30000;
-
 async function kokoroSpeak(text, voiceId) {
-  const tts = await Promise.race([
-    loadKokoro(),
-    new Promise((_, rej) => setTimeout(() => rej(new Error("Kokoro demorou para carregar")), KOKORO_TIMEOUT)),
-  ]);
+  const tts = await loadKokoro();
   $("voice-status").textContent = "voz: Kokoro 82M (open-source) — gerando…";
   const audio = await tts.generate(text.slice(0, 600), { voice: voiceId, speed: voiceSpeed() });
   const url = URL.createObjectURL(floatToWavBlob(audio.audio, audio.sampling_rate || 24000));
@@ -602,7 +607,7 @@ async function speak(text) {
     return;
   } catch (err) {
     console.warn("Kokoro indisponível:", err);
-    $("voice-status").textContent = "voz: Alex (masculina) ainda baixando — esta resposta sai na voz temporária";
+    $("voice-status").textContent = "voz: não consegui baixar a voz masculina (sem internet?) — vozes do sistema também não têm homem";
   }
   browserSpeak(clean);
 }
