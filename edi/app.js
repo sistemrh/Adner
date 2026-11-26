@@ -14,6 +14,10 @@ const VOICE_CANDIDATES = [
   { id: "Ricardo", label: "Ricardo (Amazon, masc.)", gender: "M" }
 ];
 const STREAM_ELEMENTS_URL = "https://api.streamelements.com/kappa/v2/speech";
+const ELEVEN_URL = "https://api.elevenlabs.io/v1/text-to-speech/";
+const ELEVEN_VOICE_ID = "ErXwobaYiN019PkySvjV";
+const ELEVEN_MODEL = "eleven_multilingual_v2";
+const ELEVEN_OPTION = { id: "eleven-antoni", label: "Antoni — masculina natural (ElevenLabs)", gender: "M" };
 const MAX_CHUNK = 900;
 
 const SYSTEM_PROMPT = [
@@ -33,6 +37,8 @@ const stopSpeechBtn = document.getElementById("stop-speech");
 const textForm = document.getElementById("text-form");
 const textInput = document.getElementById("text-input");
 const voiceSelect = document.getElementById("voice-select");
+const elevenKeyInput = document.getElementById("eleven-key");
+const elevenSaveBtn = document.getElementById("eleven-save");
 
 const history = [
   { role: "system", content: SYSTEM_PROMPT }
@@ -47,20 +53,27 @@ let audioPlayer = new Audio();
 let speakSession = 0;
 let workingVoices = [];
 
+function getElevenKey() {
+  return (localStorage.getItem("edi-elevenlabs-key") || "").trim();
+}
+
 function populateVoiceSelect(voices, preferredId) {
   const previous = preferredId || voiceSelect.value;
   voiceSelect.innerHTML = "";
+  const options = [];
+  if (getElevenKey()) options.push(ELEVEN_OPTION);
+  options.push(...voices);
   const browserOption = document.createElement("option");
   browserOption.value = "browser";
-  browserOption.textContent = voices.length === 0
+  browserOption.textContent = options.length === 0
     ? "Voz do navegador (nenhuma voz remota disponível)"
     : "Voz do navegador";
-  if (voices.length === 0) {
+  if (options.length === 0) {
     voiceSelect.appendChild(browserOption);
     voiceSelect.value = "browser";
     return;
   }
-  voices.forEach(v => {
+  options.forEach(v => {
     const option = document.createElement("option");
     option.value = v.id;
     option.textContent = v.label + " ✓";
@@ -68,9 +81,10 @@ function populateVoiceSelect(voices, preferredId) {
   });
   voiceSelect.appendChild(browserOption);
   const savedVoice = localStorage.getItem("edi-voice");
-  const validIds = voices.map(v => v.id).concat(["browser"]);
+  const validIds = options.map(v => v.id).concat(["browser"]);
   if (previous && validIds.includes(previous)) voiceSelect.value = previous;
   else if (savedVoice && validIds.includes(savedVoice)) voiceSelect.value = savedVoice;
+  else if (getElevenKey()) voiceSelect.value = ELEVEN_OPTION.id;
   else {
     const female = voices.find(v => v.gender === "F");
     voiceSelect.value = (female || voices[0]).id;
@@ -83,7 +97,11 @@ voiceSelect.addEventListener("change", () => {
   stopSpeaking();
 });
 
-async function probeVoice(id) {
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function probeOnce(id) {
   return new Promise((resolve) => {
     const audio = new Audio();
     const url = `${STREAM_ELEMENTS_URL}?voice=${encodeURIComponent(id)}&text=${encodeURIComponent("Olá.")}`;
@@ -92,11 +110,15 @@ async function probeVoice(id) {
       if (done) return;
       done = true;
       clearTimeout(timer);
+      audio.onloadedmetadata = null;
+      audio.oncanplay = null;
       audio.oncanplaythrough = null;
       audio.onerror = null;
       resolve(ok);
     };
-    const timer = setTimeout(() => finish(false), 6000);
+    const timer = setTimeout(() => finish(false), 8000);
+    audio.onloadedmetadata = () => finish(true);
+    audio.oncanplay = () => finish(true);
     audio.oncanplaythrough = () => finish(true);
     audio.onerror = () => finish(false);
     audio.preload = "auto";
@@ -105,16 +127,27 @@ async function probeVoice(id) {
   });
 }
 
+async function probeVoice(id) {
+  if (await probeOnce(id)) return true;
+  await sleep(1500);
+  return probeOnce(id);
+}
+
 async function discoverVoices() {
   const found = [];
   for (let i = 0; i < VOICE_CANDIDATES.length; i++) {
     const candidate = VOICE_CANDIDATES[i];
     if (!busy) setStatus(`Testando vozes… (${i + 1}/${VOICE_CANDIDATES.length})`, "idle");
     if (await probeVoice(candidate.id)) found.push(candidate);
+    await sleep(600);
   }
   workingVoices = found;
   populateVoiceSelect(found, voiceSelect.value);
-  if (!busy && !orb.classList.contains("listening")) setStatus("Pronta quando você precisar.", "idle");
+  if (!busy && !orb.classList.contains("listening")) {
+    setStatus(workingVoices.length === 0 && !getElevenKey()
+      ? "Nenhuma voz remota disponível — configure a ElevenLabs abaixo ou use a voz do navegador."
+      : "Pronta quando você precisar.", "idle");
+  }
 }
 discoverVoices();
 
@@ -158,6 +191,21 @@ if (SpeechRecognition) {
 } else {
   setStatus("Seu navegador não suporta voz. Use o campo de texto abaixo.", "idle");
 }
+
+elevenKeyInput.value = getElevenKey() ? "••••••••••••••••" : "";
+elevenSaveBtn.addEventListener("click", () => {
+  const value = elevenKeyInput.value.trim();
+  if (value && value !== "••••••••••••••••") {
+    localStorage.setItem("edi-elevenlabs-key", value);
+  } else if (!value) {
+    localStorage.removeItem("edi-elevenlabs-key");
+  }
+  populateVoiceSelect(workingVoices, ELEVEN_OPTION.id);
+  stopSpeaking();
+  setStatus(getElevenKey()
+    ? "Voz natural masculina ativada! Fale com a Edi."
+    : "Chave removida. Usando vozes padrão.", "idle");
+});
 
 orb.addEventListener("click", () => {
   if (!recognition) {
@@ -325,6 +373,11 @@ async function speak(text) {
     if (session !== speakSession) return;
     if (voiceId === "browser") {
       await speakWithBrowser(chunk, session);
+    } else if (voiceId === ELEVEN_OPTION.id) {
+      const ok = await speakWithElevenLabs(chunk, session);
+      if (!ok && session === speakSession) {
+        await speakWithBrowser(chunk, session, true, ELEVEN_OPTION.gender);
+      }
     } else {
       const selected = VOICE_CANDIDATES.find(v => v.id === voiceId) || VOICE_CANDIDATES[0];
       const chain = [voiceId];
@@ -373,6 +426,51 @@ function speakWithStreamElements(text, voiceId, session) {
     player.src = url;
     player.play().catch(() => { clearTimeout(timeout); finish(false); });
   });
+}
+
+async function speakWithElevenLabs(text, session) {
+  const key = getElevenKey();
+  if (!key) return false;
+  try {
+    const response = await fetch(ELEVEN_URL + ELEVEN_VOICE_ID, {
+      method: "POST",
+      headers: {
+        "xi-api-key": key,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        text: text,
+        model_id: ELEVEN_MODEL
+      })
+    });
+    if (!response.ok) {
+      if (response.status === 401) {
+        addMessage("error", "Chave da ElevenLabs inválida — verifique o campo de voz premium.");
+      } else if (response.status === 429) {
+        addMessage("error", "Cota gratuita da ElevenLabs esgotada neste mês.");
+      }
+      return false;
+    }
+    const blob = await response.blob();
+    return await new Promise((resolve) => {
+      const player = new Audio(URL.createObjectURL(blob));
+      audioPlayer = player;
+      let settled = false;
+      const finish = (ok) => {
+        if (settled) return;
+        settled = true;
+        player.onended = null;
+        player.onerror = null;
+        resolve(ok);
+      };
+      player.onended = () => finish(true);
+      player.onerror = () => finish(false);
+      if (session !== speakSession) return resolve(false);
+      player.play().catch(() => finish(false));
+    });
+  } catch (e) {
+    return false;
+  }
 }
 
 function speakWithBrowser(text, session, isFallback = false, gender = "F") {
