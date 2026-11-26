@@ -39,6 +39,7 @@ const SYSTEM_PROMPT = [
   "Quando Claudio pedir para anotar, tomar nota, guardar ou lembrar de algo, use a ferramenta remember e confirme em uma frase curta.",
   "Quando Claudio pedir para esquecer ou apagar algo, use a ferramenta forget e confirme.",
   "Para perguntas sobre o tempo, use a ferramenta get_weather. Se não souberem a cidade, pergunte apenas qual cidade.",
+  "Para notícias, use a ferramenta get_news e faça um resumo falado das principais: agrupe os assuntos mais relevantes em poucas frases naturais, sem listar uma por uma, e cite a fonte quando fizer sentido.",
   "Você sabe a data e a hora atuais porque elas são informadas neste prompt. Use-as sem hesitar."
 ].join(" ");
 
@@ -142,6 +143,19 @@ const TOOLS = [
           cidade: { type: "string", description: "Nome da cidade, ex.: São Paulo" }
         },
         required: ["cidade"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_news",
+      description: "Obtém as principais notícias do dia no Brasil; pode filtrar por um assunto específico",
+      parameters: {
+        type: "object",
+        properties: {
+          assunto: { type: "string", description: "Assunto opcional para filtrar, ex.: economia, esportes, política, Brasil. Vazio para as manchetes gerais do dia." }
+        }
       }
     }
   },
@@ -507,6 +521,8 @@ async function askGroq() {
           const args = JSON.parse(call.function.arguments || "{}");
           if (call.function.name === "get_weather") {
             result = JSON.stringify(await getWeather(args.cidade || ""));
+          } else if (call.function.name === "get_news") {
+            result = JSON.stringify(await getNews(args.assunto || ""));
           } else if (call.function.name === "remember") {
             const fato = (args.fato || "").trim();
             if (fato) {
@@ -578,6 +594,75 @@ async function getWeather(cidade) {
       chuva_mm: weather.daily.precipitation_sum[1],
       condicao: WMO_CODES[weather.daily.weather_code[1]] || "condição desconhecida"
     }
+  };
+}
+
+function splitHeadline(title) {
+  const idx = title.lastIndexOf(" - ");
+  if (idx > 0) return { titulo: title.slice(0, idx), fonte: title.slice(idx + 3) };
+  return { titulo: title, fonte: "" };
+}
+
+function formatHour(pubDate) {
+  if (!pubDate) return "";
+  const date = new Date(pubDate);
+  if (isNaN(date)) return "";
+  return date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+}
+
+function parseRssXml(xmlText) {
+  const doc = new DOMParser().parseFromString(xmlText, "text/xml");
+  return Array.from(doc.querySelectorAll("item"))
+    .slice(0, 15)
+    .map(item => ({
+      title: (item.querySelector("title") || {}).textContent || "",
+      pubDate: (item.querySelector("pubDate") || {}).textContent || ""
+    }))
+    .filter(n => n.title);
+}
+
+async function fetchNewsRss(url) {
+  const strategies = [
+    async () => {
+      const response = await fetch("https://api.rss2json.com/v1/api.json?rss_url=" + encodeURIComponent(url) + "&count=15");
+      if (!response.ok) throw new Error("rss2json " + response.status);
+      const data = await response.json();
+      if (data.status !== "ok" || !Array.isArray(data.items)) throw new Error("rss2json falhou");
+      return data.items.map(i => ({ title: i.title || "", pubDate: i.pubDate || "" })).filter(n => n.title);
+    },
+    async () => {
+      const response = await fetch("https://api.allorigins.win/raw?url=" + encodeURIComponent(url));
+      if (!response.ok) throw new Error("allorigins " + response.status);
+      return parseRssXml(await response.text());
+    },
+    async () => {
+      const response = await fetch("https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(url));
+      if (!response.ok) throw new Error("codetabs " + response.status);
+      return parseRssXml(await response.text());
+    }
+  ];
+  for (const strategy of strategies) {
+    try {
+      const items = await strategy();
+      if (items.length) return items;
+    } catch (e) { /* try next source */ }
+  }
+  return [];
+}
+
+async function getNews(assunto) {
+  const url = assunto
+    ? `https://news.google.com/rss/search?q=${encodeURIComponent(assunto)}&hl=pt-BR&gl=BR&ceid=BR:pt-419`
+    : "https://news.google.com/rss?hl=pt-BR&gl=BR&ceid=BR:pt-419";
+  const items = await fetchNewsRss(url);
+  if (!items.length) return { erro: "Não consegui obter as notícias agora." };
+  return {
+    assunto: assunto || "manchetes do dia",
+    total: items.length,
+    noticias: items.slice(0, 12).map(n => {
+      const { titulo, fonte } = splitHeadline(n.title);
+      return { titulo: titulo, fonte: fonte, hora: formatHour(n.pubDate) };
+    })
   };
 }
 
