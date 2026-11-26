@@ -15,10 +15,15 @@ const VOICE_CANDIDATES = [
 ];
 const STREAM_ELEMENTS_URL = "https://api.streamelements.com/kappa/v2/speech";
 const ELEVEN_URL = "https://api.elevenlabs.io/v1/text-to-speech/";
-const ELEVEN_VOICE_ID = "ErXwobaYiN019PkySvjV";
 const ELEVEN_MODEL = "eleven_multilingual_v2";
 const ELEVEN_DEFAULT_KEY = "sk_1c4bb0ec01544ceb04242958ad2585db7c1c7ede523c4c35";
-const ELEVEN_OPTION = { id: "eleven-antoni", label: "Antoni — masculina natural (ElevenLabs)", gender: "M" };
+const ELEVEN_DEFAULT_VOICE = "JBFqnCBsd6RMkjVDRZzb";
+const ELEVEN_VOICES = [
+  { id: "eleven:JBFqnCBsd6RMkjVDRZzb", label: "George — masculina natural (padrão)", gender: "M" },
+  { id: "eleven:nPczCjzI2devNBz1zQrb", label: "Brian — masculina, grave e retumbante", gender: "M" },
+  { id: "eleven:CwhRBWXzGAHq8TQ4Fs17", label: "Roger — masculina, casual e ressoante", gender: "M" },
+  { id: "eleven:onwK4e9ZLuTAKqWW03F9", label: "Daniel — masculina, locutor formal", gender: "M" }
+];
 const SPEECHIFY_API_KEY = "sk_aws5h0bt4k98pf3kz5nfcd1w00w2hqsash8wtxrk5sw";
 const SPEECHIFY_URL = "https://api.speechify.ai/v1/audio/stream";
 const SPEECHIFY_VOICES_URL = "https://api.speechify.ai/v1/voices";
@@ -72,7 +77,7 @@ function populateVoiceSelect(voices, preferredId) {
   const previous = preferredId || voiceSelect.value;
   voiceSelect.innerHTML = "";
   const options = [];
-  if (getElevenKey()) options.push(ELEVEN_OPTION);
+  if (getElevenKey()) options.push(...ELEVEN_VOICES);
   speechifyVoices.forEach(v => {
     options.push({
       id: SPEECHIFY_PREFIX + v.id,
@@ -102,7 +107,10 @@ function populateVoiceSelect(voices, preferredId) {
   const validIds = options.map(v => v.id).concat(["browser"]);
   if (previous && validIds.includes(previous)) voiceSelect.value = previous;
   else if (savedVoice && validIds.includes(savedVoice)) voiceSelect.value = savedVoice;
-  else if (getElevenKey()) voiceSelect.value = ELEVEN_OPTION.id;
+  else if (getElevenKey()) {
+    const eleven = options.find(v => v.id.startsWith("eleven:"));
+    voiceSelect.value = eleven ? eleven.id : options[0].id;
+  }
   else {
     const maleSpeechify = options.find(v => v.id.startsWith(SPEECHIFY_PREFIX) && v.gender === "M");
     voiceSelect.value = maleSpeechify ? maleSpeechify.id : options[0].id;
@@ -218,7 +226,7 @@ elevenSaveBtn.addEventListener("click", () => {
   } else if (!value) {
     localStorage.removeItem("edi-elevenlabs-key");
   }
-  populateVoiceSelect(workingVoices, ELEVEN_OPTION.id);
+  populateVoiceSelect(workingVoices, "eleven:" + ELEVEN_DEFAULT_VOICE);
   stopSpeaking();
   setStatus(getElevenKey()
     ? "Voz natural masculina ativada! Fale com a Edi."
@@ -391,10 +399,11 @@ async function speak(text) {
     if (session !== speakSession) return;
     if (voiceId === "browser") {
       await speakWithBrowser(chunk, session);
-    } else if (voiceId === ELEVEN_OPTION.id) {
-      const ok = await speakWithElevenLabs(chunk, session);
+    } else if (voiceId.startsWith("eleven:")) {
+      const elevenVoice = voiceId.slice(7);
+      const ok = await speakWithElevenLabs(chunk, session, elevenVoice);
       if (!ok && session === speakSession) {
-        await speakWithBrowser(chunk, session, true, ELEVEN_OPTION.gender);
+        await speakWithBrowser(chunk, session, true, "M");
       }
     } else if (voiceId.startsWith(SPEECHIFY_PREFIX)) {
       const sfxVoice = voiceId.slice(SPEECHIFY_PREFIX.length);
@@ -452,11 +461,11 @@ function speakWithStreamElements(text, voiceId, session) {
   });
 }
 
-async function speakWithElevenLabs(text, session) {
+async function speakWithElevenLabs(text, session, voiceId) {
   const key = getElevenKey();
   if (!key) return false;
   try {
-    const response = await fetch(ELEVEN_URL + ELEVEN_VOICE_ID, {
+    const response = await fetch(ELEVEN_URL + voiceId, {
       method: "POST",
       headers: {
         "xi-api-key": key,
