@@ -299,7 +299,7 @@ function buildSystemPrompt(nativeTools = true) {
 
 const DEFAULTS = {
   puter: { model: "gpt-5-nano" },
-  groq: { model: "llama-3.3-70b-versatile", base: "https://api.groq.com/openai/v1" },
+  groq: { model: "openai/gpt-oss-120b", base: "https://api.groq.com/openai/v1" },
   openrouter: { model: "google/gemma-4-31b-it:free", base: "https://openrouter.ai/api/v1" },
   ollama: { model: "llama3.2", base: "http://localhost:11434/v1" },
 };
