@@ -22,6 +22,7 @@ const SPEECHIFY_API_KEY = "sk_aws5h0bt4k98pf3kz5nfcd1w00w2hqsash8wtxrk5sw";
 const SPEECHIFY_URL = "https://api.speechify.ai/v1/audio/stream";
 const SPEECHIFY_VOICES_URL = "https://api.speechify.ai/v1/voices";
 const SPEECHIFY_MODEL = "simba-multilingual";
+const SPEECHIFY_MODELS = ["simba-multilingual", "simba-3.2", "simba-3.0", "simba-english"];
 const SPEECHIFY_PREFIX = "speechify:";
 const SPEECHIFY_FALLBACK_VOICE = "geffen_32";
 const SPEECHIFY_GENDER = {};
@@ -496,47 +497,54 @@ async function speakWithElevenLabs(text, session) {
 }
 
 async function speakWithSpeechify(text, session, voiceId) {
+  const models = [localStorage.getItem("edi-speechify-model"), ...SPEECHIFY_MODELS]
+    .filter((m, i, arr) => m && arr.indexOf(m) === i);
+  let lastDetail = "";
   try {
-    const response = await fetch(SPEECHIFY_URL, {
-      method: "POST",
-      headers: {
-        "Authorization": "Bearer " + SPEECHIFY_API_KEY,
-        "Content-Type": "application/json",
-        "Accept": "audio/mpeg"
-      },
-      body: JSON.stringify({
-        input: text,
-        voice_id: voiceId,
-        model: SPEECHIFY_MODEL
-      })
-    });
-    if (!response.ok) {
-      let detail = "";
-      try {
-        const data = await response.json();
-        if (data.message) detail = data.message;
-        else if (data.error) detail = data.error;
-      } catch (e) { /* binary or empty */ }
-      addMessage("error", "Speechify " + response.status + (detail ? ": " + detail : "") + " — usando voz reserva.");
-      return false;
+    for (const model of models) {
+      const response = await fetch(SPEECHIFY_URL, {
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer " + SPEECHIFY_API_KEY,
+          "Content-Type": "application/json",
+          "Accept": "audio/mpeg"
+        },
+        body: JSON.stringify({
+          input: text,
+          voice_id: voiceId,
+          model: model
+        })
+      });
+      if (!response.ok) {
+        try {
+          const data = await response.json();
+          lastDetail = model + " → HTTP " + response.status + ": " + JSON.stringify(data).slice(0, 200);
+        } catch (e) {
+          lastDetail = model + " → HTTP " + response.status;
+        }
+        continue;
+      }
+      localStorage.setItem("edi-speechify-model", model);
+      const blob = await response.blob();
+      return await new Promise((resolve) => {
+        const player = new Audio(URL.createObjectURL(blob));
+        audioPlayer = player;
+        let settled = false;
+        const finish = (ok) => {
+          if (settled) return;
+          settled = true;
+          player.onended = null;
+          player.onerror = null;
+          resolve(ok);
+        };
+        player.onended = () => finish(true);
+        player.onerror = () => finish(false);
+        if (session !== speakSession) return resolve(false);
+        player.play().catch(() => finish(false));
+      });
     }
-    const blob = await response.blob();
-    return await new Promise((resolve) => {
-      const player = new Audio(URL.createObjectURL(blob));
-      audioPlayer = player;
-      let settled = false;
-      const finish = (ok) => {
-        if (settled) return;
-        settled = true;
-        player.onended = null;
-        player.onerror = null;
-        resolve(ok);
-      };
-      player.onended = () => finish(true);
-      player.onerror = () => finish(false);
-      if (session !== speakSession) return resolve(false);
-      player.play().catch(() => finish(false));
-    });
+    addMessage("error", "Speechify rejeitou tudo — " + lastDetail);
+    return false;
   } catch (e) {
     addMessage("error", "Speechify inacessível pelo navegador (CORS/rede) — usando voz reserva.");
     return false;
