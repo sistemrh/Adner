@@ -300,14 +300,15 @@ function buildSystemPrompt(nativeTools = true) {
 const DEFAULTS = {
   puter: { model: "gpt-5-nano" },
   groq: { model: "llama-3.3-70b-versatile", base: "https://api.groq.com/openai/v1" },
+  openrouter: { model: "google/gemma-4-31b-it:free", base: "https://openrouter.ai/api/v1" },
   ollama: { model: "llama3.2", base: "http://localhost:11434/v1" },
 };
 
 function activeProvider() {
   const p = localStorage.getItem("adner_provider") || "puter";
   const key = store.get("adner_key", "");
-  const model = localStorage.getItem("adner_model") || DEFAULTS[p].model;
-  return { name: p, base: DEFAULTS[p].base, key, model };
+  const model = localStorage.getItem("adner_model") || DEFAULTS[p]?.model || DEFAULTS.puter.model;
+  return { name: p, base: DEFAULTS[p]?.base || "", key, model };
 }
 
 function providerReady() {
@@ -322,14 +323,17 @@ function providerReady() {
 
 const IA_TIMEOUT = 45000;
 
-async function chatCompletion(messages) {
+async function chatCompletion(messages, useTools = true) {
   const p = activeProvider();
   const headers = { "Content-Type": "application/json" };
   if (p.key) headers.Authorization = `Bearer ${p.key}`;
+  if (p.name === "openrouter") headers["HTTP-Referer"] = location.origin, headers["X-Title"] = "Adner";
+  const body = { model: p.model, messages, temperature: 0.6 };
+  if (useTools) { body.tools = TOOLS; body.tool_choice = "auto"; }
   const res = await fetch(`${p.base}/chat/completions`, {
     method: "POST", headers,
     signal: AbortSignal.timeout(IA_TIMEOUT),
-    body: JSON.stringify({ model: p.model, messages, tools: TOOLS, tool_choice: "auto", temperature: 0.6 }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`IA respondeu ${res.status}: ${(await res.text()).slice(0, 200)}`);
   return (await res.json()).choices[0].message;
@@ -372,11 +376,11 @@ function runToolSafe(name, args) {
 
 async function agentLoop(conversationHistory) {
   const p = activeProvider();
-  const nativeTools = p.name !== "puter";
+  const nativeTools = p.name !== "puter" && p.name !== "openrouter";
   const messages = [{ role: "system", content: buildSystemPrompt(nativeTools) }, ...conversationHistory];
   for (let i = 0; i < 4; i++) {
     if (!nativeTools) {
-      const content = await puterChat(messages);
+      const content = p.name === "openrouter" ? (await chatCompletion(messages, false)).content : await puterChat(messages);
       const act = parseAction(content);
       if (!act) return content;
       messages.push({ role: "assistant", content });
@@ -750,9 +754,8 @@ $("save-settings").addEventListener("click", () => {
 
 $("provider-select").addEventListener("change", () => {
   const p = $("provider-select").value;
-  $("api-key").style.display = p === "groq" ? "" : "none";
+  updateProviderHint(p);
   $("model-input").placeholder = DEFAULTS[p].model;
-  $("provider-hint").style.display = p === "groq" ? "" : "none";
 });
 
 $("clear-data").addEventListener("click", () => {
@@ -768,10 +771,24 @@ function updateProviderUI() {
     $("provider").textContent = "IA: Puter inacessível — use chave Groq ⚙️ ou Ollama";
   } else $("provider").textContent = providerReady() ? `IA: ${p.model} (${p.name})` : "IA: configure ⚙️";
   $("provider-select").value = p.name;
-  $("api-key").style.display = p.name === "groq" ? "" : "none";
-  $("provider-hint").style.display = p.name === "groq" ? "" : "none";
+  updateProviderHint(p.name);
   $("model-input").value = localStorage.getItem("adner_model") || "";
   $("model-input").placeholder = DEFAULTS[p.name].model;
+}
+
+function updateProviderHint(name) {
+  const keys = name === "groq" || name === "openrouter";
+  $("api-key").style.display = keys ? "" : "none";
+  $("provider-hint").style.display = keys ? "" : "none";
+  if (name === "openrouter") {
+    $("provider-hint").href = "https://openrouter.ai/keys";
+    $("provider-hint").textContent = "🔑 Criar chave grátis da OpenRouter";
+    $("api-key").placeholder = "Chave OpenRouter (sk-or-...) — fica só no seu aparelho";
+  } else {
+    $("provider-hint").href = "https://console.groq.com/keys";
+    $("provider-hint").textContent = "🔑 Criar chave grátis da Groq";
+    $("api-key").placeholder = "Chave (opcional)";
+  }
 }
 
 async function refreshSide() {
