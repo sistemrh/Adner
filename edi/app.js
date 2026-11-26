@@ -3,35 +3,12 @@ const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "openai/gpt-oss-120b";
 const WAKE_WORD = "edi";
 
-const VOICE_CANDIDATES = [
-  { id: "pt-BR-Wavenet-A", label: "Ana (Google, neural)", gender: "F" },
-  { id: "pt-BR-Standard-A", label: "Alice (Google)", gender: "F" },
-  { id: "Vitoria", label: "Vitória (Amazon)", gender: "F" },
-  { id: "pt-BR-Chirp3-HD-Charon", label: "Charon (Google HD, masc.)", gender: "M" },
-  { id: "pt-BR-Chirp3-HD-Fenrir", label: "Fenrir (Google HD, masc.)", gender: "M" },
-  { id: "pt-BR-Wavenet-C", label: "Marcos (Google, masc.)", gender: "M" },
-  { id: "pt-BR-Standard-C", label: "Marcelo (Google, masc.)", gender: "M" },
-  { id: "Ricardo", label: "Ricardo (Amazon, masc.)", gender: "M" }
-];
-const STREAM_ELEMENTS_URL = "https://api.streamelements.com/kappa/v2/speech";
-const ELEVEN_URL = "https://api.elevenlabs.io/v1/text-to-speech/";
-const ELEVEN_MODEL = "eleven_multilingual_v2";
-const ELEVEN_DEFAULT_KEY = "sk_1c4bb0ec01544ceb04242958ad2585db7c1c7ede523c4c35";
-const ELEVEN_DEFAULT_VOICE = "JBFqnCBsd6RMkjVDRZzb";
-const ELEVEN_VOICES = [
-  { id: "eleven:JBFqnCBsd6RMkjVDRZzb", label: "George — masculina natural (padrão)", gender: "M" },
-  { id: "eleven:nPczCjzI2devNBz1zQrb", label: "Brian — masculina, grave e retumbante", gender: "M" },
-  { id: "eleven:CwhRBWXzGAHq8TQ4Fs17", label: "Roger — masculina, casual e ressoante", gender: "M" },
-  { id: "eleven:onwK4e9ZLuTAKqWW03F9", label: "Daniel — masculina, locutor formal", gender: "M" }
-];
 const SPEECHIFY_API_KEY = "sk_aws5h0bt4k98pf3kz5nfcd1w00w2hqsash8wtxrk5sw";
 const SPEECHIFY_URL = "https://api.speechify.ai/v1/audio/stream";
 const SPEECHIFY_VOICES_URL = "https://api.speechify.ai/v1/voices";
-const SPEECHIFY_MODEL = "simba-multilingual";
 const SPEECHIFY_MODELS = ["simba-multilingual", "simba-3.2", "simba-3.0", "simba-english"];
-const SPEECHIFY_PREFIX = "speechify:";
+const SPEECHIFY_VOICE_NAME = "caio";
 const SPEECHIFY_FALLBACK_VOICE = "geffen_32";
-const SPEECHIFY_GENDER = {};
 const MAX_CHUNK = 900;
 
 const SYSTEM_PROMPT = [
@@ -50,9 +27,6 @@ const continuousToggle = document.getElementById("continuous");
 const stopSpeechBtn = document.getElementById("stop-speech");
 const textForm = document.getElementById("text-form");
 const textInput = document.getElementById("text-input");
-const voiceSelect = document.getElementById("voice-select");
-const elevenKeyInput = document.getElementById("eleven-key");
-const elevenSaveBtn = document.getElementById("eleven-save");
 
 const history = [
   { role: "system", content: SYSTEM_PROMPT }
@@ -65,117 +39,39 @@ let manualStop = false;
 let busy = false;
 let audioPlayer = new Audio();
 let speakSession = 0;
-let workingVoices = [];
-let speechifyVoices = [{ id: SPEECHIFY_FALLBACK_VOICE, name: "voz padrão", gender: "M" }];
-SPEECHIFY_GENDER[SPEECHIFY_FALLBACK_VOICE] = "M";
-
-function getElevenKey() {
-  return (localStorage.getItem("edi-elevenlabs-key") || ELEVEN_DEFAULT_KEY).trim();
-}
-
-function populateVoiceSelect(voices, preferredId) {
-  const previous = preferredId || voiceSelect.value;
-  voiceSelect.innerHTML = "";
-  const options = [];
-  if (getElevenKey()) options.push(...ELEVEN_VOICES);
-  speechifyVoices.forEach(v => {
-    options.push({
-      id: SPEECHIFY_PREFIX + v.id,
-      label: "Speechify: " + v.name + (v.gender === "M" ? " (masc.)" : " (fem.)"),
-      gender: v.gender
-    });
-  });
-  options.push(...voices);
-  const browserOption = document.createElement("option");
-  browserOption.value = "browser";
-  browserOption.textContent = options.length === 0
-    ? "Voz do navegador (nenhuma voz remota disponível)"
-    : "Voz do navegador";
-  if (options.length === 0) {
-    voiceSelect.appendChild(browserOption);
-    voiceSelect.value = "browser";
-    return;
-  }
-  options.forEach(v => {
-    const option = document.createElement("option");
-    option.value = v.id;
-    option.textContent = v.label + " ✓";
-    voiceSelect.appendChild(option);
-  });
-  voiceSelect.appendChild(browserOption);
-  const savedVoice = localStorage.getItem("edi-voice");
-  const validIds = options.map(v => v.id).concat(["browser"]);
-  if (previous && validIds.includes(previous)) voiceSelect.value = previous;
-  else if (savedVoice && validIds.includes(savedVoice)) voiceSelect.value = savedVoice;
-  else if (getElevenKey()) {
-    const eleven = options.find(v => v.id.startsWith("eleven:"));
-    voiceSelect.value = eleven ? eleven.id : options[0].id;
-  }
-  else {
-    const maleSpeechify = options.find(v => v.id.startsWith(SPEECHIFY_PREFIX) && v.gender === "M");
-    voiceSelect.value = maleSpeechify ? maleSpeechify.id : options[0].id;
-  }
-}
-
-populateVoiceSelect(VOICE_CANDIDATES, null);
-voiceSelect.addEventListener("change", () => {
-  localStorage.setItem("edi-voice", voiceSelect.value);
-  stopSpeaking();
-});
+let speechifyVoiceId = localStorage.getItem("edi-speechify-voice") || "";
+let speechifyModel = localStorage.getItem("edi-speechify-model") || "";
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function probeOnce(id) {
-  return new Promise((resolve) => {
-    const audio = new Audio();
-    const url = `${STREAM_ELEMENTS_URL}?voice=${encodeURIComponent(id)}&text=${encodeURIComponent("Olá.")}`;
-    let done = false;
-    const finish = (ok) => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      audio.onloadedmetadata = null;
-      audio.oncanplay = null;
-      audio.oncanplaythrough = null;
-      audio.onerror = null;
-      resolve(ok);
-    };
-    const timer = setTimeout(() => finish(false), 8000);
-    audio.onloadedmetadata = () => finish(true);
-    audio.oncanplay = () => finish(true);
-    audio.oncanplaythrough = () => finish(true);
-    audio.onerror = () => finish(false);
-    audio.preload = "auto";
-    audio.src = url;
-    audio.load();
-  });
-}
-
-async function probeVoice(id) {
-  if (await probeOnce(id)) return true;
-  await sleep(1500);
-  return probeOnce(id);
-}
-
-async function discoverVoices() {
-  const found = [];
-  for (let i = 0; i < VOICE_CANDIDATES.length; i++) {
-    const candidate = VOICE_CANDIDATES[i];
-    if (!busy) setStatus(`Testando vozes… (${i + 1}/${VOICE_CANDIDATES.length})`, "idle");
-    if (await probeVoice(candidate.id)) found.push(candidate);
-    await sleep(600);
+async function discoverSpeechifyVoice() {
+  const variants = [
+    "?type=shared&locale=pt-BR&limit=200",
+    "?type=shared&locale=pt&limit=200",
+    "?type=shared&limit=200"
+  ];
+  for (const qs of variants) {
+    try {
+      const response = await fetch(SPEECHIFY_VOICES_URL + qs, {
+        headers: { "Authorization": "Bearer " + SPEECHIFY_API_KEY }
+      });
+      if (!response.ok) continue;
+      const data = await response.json();
+      const items = Array.isArray(data) ? data : (data.voices || data.items || data.data || []);
+      const wanted = items.find(v => (v.display_name || v.name || "").toLowerCase().includes(SPEECHIFY_VOICE_NAME))
+        || items.find(v => (v.gender || (v.labels && v.labels.gender) || "").toString().toLowerCase().startsWith("m"));
+      if (wanted && (wanted.id || wanted.voice_id)) {
+        speechifyVoiceId = wanted.id || wanted.voice_id;
+        localStorage.setItem("edi-speechify-voice", speechifyVoiceId);
+        return;
+      }
+    } catch (e) { /* try next variant */ }
   }
-  workingVoices = found;
-  populateVoiceSelect(found, voiceSelect.value);
-  if (!busy && !orb.classList.contains("listening")) {
-    setStatus(workingVoices.length === 0 && !getElevenKey()
-      ? "Nenhuma voz remota disponível — configure a ElevenLabs abaixo ou use a voz do navegador."
-      : "Pronta quando você precisar.", "idle");
-  }
+  if (!speechifyVoiceId) speechifyVoiceId = SPEECHIFY_FALLBACK_VOICE;
 }
-discoverVoices();
+discoverSpeechifyVoice();
 
 if (SpeechRecognition) {
   recognition = new SpeechRecognition();
@@ -217,21 +113,6 @@ if (SpeechRecognition) {
 } else {
   setStatus("Seu navegador não suporta voz. Use o campo de texto abaixo.", "idle");
 }
-
-elevenKeyInput.value = getElevenKey() ? "••••••••••••••••" : "";
-elevenSaveBtn.addEventListener("click", () => {
-  const value = elevenKeyInput.value.trim();
-  if (value && value !== "••••••••••••••••") {
-    localStorage.setItem("edi-elevenlabs-key", value);
-  } else if (!value) {
-    localStorage.removeItem("edi-elevenlabs-key");
-  }
-  populateVoiceSelect(workingVoices, "eleven:" + ELEVEN_DEFAULT_VOICE);
-  stopSpeaking();
-  setStatus(getElevenKey()
-    ? "Voz natural masculina ativada! Fale com a Edi."
-    : "Chave removida. Usando vozes padrão.", "idle");
-});
 
 orb.addEventListener("click", () => {
   if (!recognition) {
@@ -394,41 +275,11 @@ async function speak(text) {
   orb.classList.add("speaking");
   setStatus("Edi está falando…", "speaking");
 
-  const voiceId = voiceSelect.value;
   for (const chunk of chunks) {
     if (session !== speakSession) return;
-    if (voiceId === "browser") {
-      await speakWithBrowser(chunk, session);
-    } else if (voiceId.startsWith("eleven:")) {
-      const elevenVoice = voiceId.slice(7);
-      const ok = await speakWithElevenLabs(chunk, session, elevenVoice);
-      if (!ok && session === speakSession) {
-        await speakWithBrowser(chunk, session, true, "M");
-      }
-    } else if (voiceId.startsWith(SPEECHIFY_PREFIX)) {
-      const sfxVoice = voiceId.slice(SPEECHIFY_PREFIX.length);
-      const ok = await speakWithSpeechify(chunk, session, sfxVoice);
-      if (!ok && session === speakSession) {
-        await speakWithBrowser(chunk, session, true, SPEECHIFY_GENDER[sfxVoice] || "M");
-      }
-    } else {
-      const selected = VOICE_CANDIDATES.find(v => v.id === voiceId) || VOICE_CANDIDATES[0];
-      const chain = [voiceId];
-      workingVoices.forEach(v => {
-        if (v.id !== voiceId && v.gender === selected.gender) chain.push(v.id);
-      });
-      workingVoices.forEach(v => {
-        if (v.id !== voiceId && v.gender !== selected.gender) chain.push(v.id);
-      });
-      let spoken = false;
-      for (const candidate of chain) {
-        if (session !== speakSession) return;
-        if (await speakWithStreamElements(chunk, candidate, session)) {
-          spoken = true;
-          break;
-        }
-      }
-      if (!spoken) await speakWithBrowser(chunk, session, true, selected.gender);
+    const ok = await speakWithSpeechify(chunk, session);
+    if (!ok && session === speakSession) {
+      await speakWithBrowser(chunk, session, true);
     }
     if (session !== speakSession) return;
   }
@@ -439,77 +290,9 @@ async function speak(text) {
   }
 }
 
-function speakWithStreamElements(text, voiceId, session) {
-  return new Promise((resolve) => {
-    const url = `${STREAM_ELEMENTS_URL}?voice=${encodeURIComponent(voiceId)}&text=${encodeURIComponent(text)}`;
-    const player = new Audio();
-    audioPlayer = player;
-    let settled = false;
-    const finish = (ok) => {
-      if (settled) return;
-      settled = true;
-      player.onended = null;
-      player.onerror = null;
-      if (!ok) { player.pause(); player.src = ""; }
-      resolve(ok);
-    };
-    const timeout = setTimeout(() => finish(false), 10000);
-    player.onended = () => { clearTimeout(timeout); finish(true); };
-    player.onerror = () => { clearTimeout(timeout); finish(false); };
-    player.src = url;
-    player.play().catch(() => { clearTimeout(timeout); finish(false); });
-  });
-}
-
-async function speakWithElevenLabs(text, session, voiceId) {
-  const key = getElevenKey();
-  if (!key) return false;
-  try {
-    const response = await fetch(ELEVEN_URL + voiceId, {
-      method: "POST",
-      headers: {
-        "xi-api-key": key,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        text: text,
-        model_id: ELEVEN_MODEL
-      })
-    });
-    if (!response.ok) {
-      if (response.status === 401) {
-        addMessage("error", "Chave da ElevenLabs inválida — verifique o campo de voz premium.");
-      } else if (response.status === 429) {
-        addMessage("error", "Cota gratuita da ElevenLabs esgotada neste mês.");
-      }
-      return false;
-    }
-    const blob = await response.blob();
-    return await new Promise((resolve) => {
-      const player = new Audio(URL.createObjectURL(blob));
-      audioPlayer = player;
-      let settled = false;
-      const finish = (ok) => {
-        if (settled) return;
-        settled = true;
-        player.onended = null;
-        player.onerror = null;
-        resolve(ok);
-      };
-      player.onended = () => finish(true);
-      player.onerror = () => finish(false);
-      if (session !== speakSession) return resolve(false);
-      player.play().catch(() => finish(false));
-    });
-  } catch (e) {
-    return false;
-  }
-}
-
-async function speakWithSpeechify(text, session, voiceId) {
-  const models = [localStorage.getItem("edi-speechify-model"), ...SPEECHIFY_MODELS]
-    .filter((m, i, arr) => m && arr.indexOf(m) === i);
-  let lastDetail = "";
+async function speakWithSpeechify(text, session) {
+  if (!speechifyVoiceId) await discoverSpeechifyVoice();
+  const models = [speechifyModel, ...SPEECHIFY_MODELS].filter((m, i, arr) => m && arr.indexOf(m) === i);
   try {
     for (const model of models) {
       const response = await fetch(SPEECHIFY_URL, {
@@ -521,105 +304,42 @@ async function speakWithSpeechify(text, session, voiceId) {
         },
         body: JSON.stringify({
           input: text,
-          voice_id: voiceId,
+          voice_id: speechifyVoiceId,
           model: model
         })
       });
-      if (!response.ok) {
-        try {
-          const data = await response.json();
-          lastDetail = model + " → HTTP " + response.status + ": " + JSON.stringify(data).slice(0, 200);
-        } catch (e) {
-          lastDetail = model + " → HTTP " + response.status;
-        }
-        continue;
-      }
+      if (!response.ok) continue;
+      speechifyModel = model;
       localStorage.setItem("edi-speechify-model", model);
       const blob = await response.blob();
-      return await new Promise((resolve) => {
-        const player = new Audio(URL.createObjectURL(blob));
-        audioPlayer = player;
-        let settled = false;
-        const finish = (ok) => {
-          if (settled) return;
-          settled = true;
-          player.onended = null;
-          player.onerror = null;
-          resolve(ok);
-        };
-        player.onended = () => finish(true);
-        player.onerror = () => finish(false);
-        if (session !== speakSession) return resolve(false);
-        player.play().catch(() => finish(false));
-      });
+      return await playBlob(blob, session);
     }
-    addMessage("error", "Speechify rejeitou tudo — " + lastDetail);
     return false;
   } catch (e) {
-    addMessage("error", "Speechify inacessível pelo navegador (CORS/rede) — usando voz reserva.");
     return false;
   }
 }
 
-async function discoverSpeechifyVoice() {
-  const variants = [
-    `?type=shared&locale=pt-BR&model=${SPEECHIFY_MODEL}&limit=200`,
-    `?type=shared&locale=pt&model=${SPEECHIFY_MODEL}&limit=200`,
-    `?type=shared&model=${SPEECHIFY_MODEL}&limit=200`,
-    `?type=shared&limit=200`
-  ];
-  const collected = [];
-  let blocked = false;
-  for (const qs of variants) {
-    try {
-      const response = await fetch(SPEECHIFY_VOICES_URL + qs, {
-        headers: { "Authorization": "Bearer " + SPEECHIFY_API_KEY }
-      });
-      if (!response.ok) {
-        addMessage("info", `Speechify /voices ${qs.slice(1, 40)}… → HTTP ${response.status}`);
-        continue;
-      }
-      const data = await response.json();
-      const items = Array.isArray(data) ? data : (data.voices || data.items || data.data || []);
-      addMessage("info", `Speechify /voices ${qs.slice(1, 40)}… → ${items.length} vozes retornadas`);
-      items.forEach(v => {
-        const localeRaw = String(v.locale || v.language || (v.labels && v.labels.locale) || "").toLowerCase();
-        if (qs.includes("locale=") || localeRaw.includes("pt-br") || localeRaw === "pt" || localeRaw.startsWith("pt")) {
-          const genderRaw = (v.gender || (v.labels && v.labels.gender) || "").toString().toLowerCase();
-          const gender = genderRaw.startsWith("f") ? "F" : "M";
-          collected.push({ id: v.id || v.voice_id, name: v.display_name || v.name || v.id, gender: gender });
-        }
-      });
-      if (collected.length) break;
-    } catch (e) {
-      blocked = true;
-      break;
-    }
-  }
-  if (blocked) {
-    addMessage("info", "Speechify: o navegador bloqueou a chamada à API (CORS). A síntese também falhará — usando voz reserva.");
-    return finalizeSpeechifyVoices();
-  }
-  return finalizeSpeechifyVoices(collected);
+function playBlob(blob, session) {
+  return new Promise((resolve) => {
+    const player = new Audio(URL.createObjectURL(blob));
+    audioPlayer = player;
+    let settled = false;
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      player.onended = null;
+      player.onerror = null;
+      resolve(ok);
+    };
+    player.onended = () => finish(true);
+    player.onerror = () => finish(false);
+    if (session !== speakSession) return resolve(false);
+    player.play().catch(() => finish(false));
+  });
 }
 
-function finalizeSpeechifyVoices(collected) {
-  if (collected && collected.length) {
-    const seen = new Set();
-    speechifyVoices = collected.filter(v => {
-      if (!v.id || seen.has(v.id)) return false;
-      seen.add(v.id);
-      SPEECHIFY_GENDER[v.id] = v.gender;
-      return true;
-    });
-    speechifyVoices.sort((a, b) => (a.gender === b.gender ? 0 : a.gender === "M" ? -1 : 1));
-  }
-  populateVoiceSelect(workingVoices, null);
-}
-
-discoverSpeechifyVoice();
-
-function speakWithBrowser(text, session, isFallback = false, gender = "F") {
+function speakWithBrowser(text, session, isFallback = false, gender = "M") {
   return new Promise((resolve) => {
     if (!("speechSynthesis" in window)) return resolve(true);
     window.speechSynthesis.cancel();
@@ -630,7 +350,7 @@ function speakWithBrowser(text, session, isFallback = false, gender = "F") {
     const voices = window.speechSynthesis.getVoices();
     const ptVoices = voices.filter(v => v.lang && v.lang.toLowerCase().replace("_", "-").startsWith("pt-br")
       || (v.lang && v.lang.toLowerCase().startsWith("pt")));
-    const matchGender = gender === "M" ? /antonio|thiago|ricardo|homer|daniel|felipe|fabio|male|masculin/i : /natural|neural|francisca|luciana|maria|camila|female|feminin/i;
+    const matchGender = gender === "M" ? /caio|antonio|thiago|ricardo|homer|daniel|felipe|fabio|male|masculin/i : /natural|neural|francisca|luciana|maria|camila|female|feminin/i;
     const natural = ptVoices.find(v => /natural/i.test(v.name) && matchGender.test(v.name))
       || ptVoices.find(v => matchGender.test(v.name))
       || ptVoices.find(v => /natural|neural|google/i.test(v.name))
@@ -657,7 +377,7 @@ function setStatus(text, state) {
 function addMessage(kind, text) {
   const div = document.createElement("div");
   div.className = "msg " + kind;
-  if (kind !== "error" && kind !== "info") {
+  if (kind === "user" || kind === "edi") {
     const who = document.createElement("span");
     who.className = "who";
     who.textContent = kind === "user" ? "Você" : "Edi";

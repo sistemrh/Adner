@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Edi — Assistente de Voz</title>
-<link rel="stylesheet" href="style.css?v=8" />
+<link rel="stylesheet" href="style.css?v=15" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='40' fill='none' stroke='%2300e5ff' stroke-width='8'/%3E%3Ccircle cx='50' cy='50' r='15' fill='%2300e5ff'/%3E%3C/svg%3E" />
 </head>
 <body>
@@ -30,19 +30,7 @@
       <input type="checkbox" id="continuous" />
       <span>Escuta contínua (diga "Edi")</span>
     </label>
-    <label class="toggle">
-      <span>Voz:</span>
-      <select id="voice-select" title="Escolha a voz da Edi"></select>
-    </label>
     <button id="stop-speech" class="ghost-btn" title="Interromper fala">⏹ Silenciar</button>
-  </div>
-
-  <div class="premium">
-    <label for="eleven-key">Voz masculina natural (opcional): cole sua chave gratuita da <a href="https://elevenlabs.io" target="_blank" rel="noopener">ElevenLabs</a></label>
-    <div class="premium-row">
-      <input id="eleven-key" type="password" placeholder="sk_… (fica salva só neste navegador)" autocomplete="off" />
-      <button id="eleven-save" type="button" class="ghost-btn">Salvar</button>
-    </div>
   </div>
 
   <form id="text-form" class="text-form">
@@ -51,12 +39,8 @@
   </form>
 
   <section id="log" class="log" aria-live="polite"></section>
-
-  <footer>
-    <p>Edi v14 — voz George (ElevenLabs) · Groq + Web Speech API · Chrome/Edge</p>
-  </footer>
 </div>
 
-<script src="app.js?v=14"></script>
+<script src="app.js?v=15"></script>
 </body>
 </html>

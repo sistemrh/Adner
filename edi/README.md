@@ -7,8 +7,8 @@ Assistente de voz estilo Jarvis, 100% estático (sem backend), hospedado no GitH
 ## Como funciona
 
 - **Ouve:** Web Speech API (`SpeechRecognition`) do navegador, em português (pt-BR).
-- **Pensa:** Groq API com o modelo `llama-3.3-70b-versatile` (chave embutida no código, conforme solicitado).
-- **Fala:** síntese de voz nativa (`speechSynthesis`).
+- **Pensa:** Groq API com o modelo `openai/gpt-oss-120b` (chave embutida no código, conforme solicitado).
+- **Fala:** voz masculina natural "Caio" via Speechify API (chave embutida no código, conforme solicitado), com fallback para a síntese de voz do navegador.
 - **Modo contínuo:** ative a opção e diga **"Edi"** para chamá-la sem tocar na tela.
 
 ## Como usar
@@ -20,4 +20,7 @@ Assistente de voz estilo Jarvis, 100% estático (sem backend), hospedado no GitH
 
 ## ⚠️ Aviso de segurança
 
-A chave da API Groq está **embutida no código-fonte** e este site é **público** — qualquer pessoa pode ver a chave e consumir sua cota da Groq. Para uso pessoal/demonstração isso funciona, mas se a cota for abusada, revogue a chave em https://console.groq.com/keys e gere outra.
+As chaves da API (Groq e Speechify) estão **embutidas no código-fonte** e este site é **público** — qualquer pessoa pode vê-las e consumir as cotas. Revogue-as se notar uso anômalo:
+
+- Groq: https://console.groq.com/keys
+- Speechify: https://platform.speechify.ai/api-keys
