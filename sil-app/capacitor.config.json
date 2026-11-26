@@ -1,0 +1,8 @@
+{
+  "appId": "com.sistemrh.sil",
+  "appName": "Sil",
+  "webDir": "www",
+  "server": {
+    "url": "https://sistemrh.github.io/Adner/edi/"
+  }
+}

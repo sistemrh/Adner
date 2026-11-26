@@ -39,6 +39,7 @@ const SYSTEM_PROMPT = [
   "Quando Claudio pedir para anotar, tomar nota, guardar ou lembrar de algo, use a ferramenta remember e confirme em uma frase curta.",
   "Quando Claudio pedir para esquecer ou apagar algo, use a ferramenta forget e confirme.",
   "Para perguntas sobre o tempo, use a ferramenta get_weather. Se não souberem a cidade, pergunte apenas qual cidade.",
+  "Quando Claudio pedir para ver ou ler as mensagens do WhatsApp, use a ferramenta get_messages e diga quem mandou e o que disseram.",
   "Para notícias, use a ferramenta get_news e faça um resumo falado das principais: agrupe os assuntos mais relevantes em poucas frases naturais, sem listar uma por uma, e cite a fonte quando fizer sentido.",
   "Você sabe a data e a hora atuais porque elas são informadas neste prompt. Use-as sem hesitar."
 ].join(" ");
@@ -48,6 +49,7 @@ const SUPABASE_KEY = "sb_publishable_TOLM_QG6OEuogwUG5D6PKw_8dm-SJ6s";
 const MEMORY_TABLE = "memories";
 const MEMORY_KEY = "sil-memories";
 const LAST_CHAT_KEY = "sil-last-chat";
+const MESSAGES_TABLE = "messages";
 
 let memories = [];
 try { memories = JSON.parse(localStorage.getItem(MEMORY_KEY)) || []; } catch (e) { memories = []; }
@@ -152,6 +154,35 @@ async function forgetFacts(terms) {
   return before - memories.length;
 }
 
+async function getMessages() {
+  try {
+    const response = await supabaseRequest(`${MESSAGES_TABLE}?select=id,remetente,texto,recebida&lida=eq.false&order=recebida.desc&limit=15`);
+    const rows = await response.json();
+    if (!rows.length) {
+      return { novas: 0, aviso: "Nenhuma mensagem nova do WhatsApp." };
+    }
+    for (const row of rows) {
+      try {
+        await supabaseRequest(`${MESSAGES_TABLE}?id=eq.${encodeURIComponent(row.id)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ lida: true }),
+          headers: { "Prefer": "return=minimal" }
+        });
+      } catch (e) { /* deixa como não lida */ }
+    }
+    return {
+      novas: rows.length,
+      mensagens: rows.map(r => ({
+        de: r.remetente,
+        texto: r.texto,
+        quando: new Date(r.recebida).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
+      }))
+    };
+  } catch (e) {
+    return { aviso: "Não consegui acessar as mensagens agora." };
+  }
+}
+
 const TOOLS = [
   {
     type: "function",
@@ -178,6 +209,14 @@ const TOOLS = [
           assunto: { type: "string", description: "Assunto opcional para filtrar, ex.: economia, esportes, política, Brasil. Vazio para as manchetes gerais do dia." }
         }
       }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_messages",
+      description: "Lê as mensagens novas do WhatsApp que chegaram no celular e as marca como lidas",
+      parameters: { type: "object", properties: {} }
     }
   },
   {
@@ -223,6 +262,7 @@ const history = [
 ];
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const NativeSpeechRecognition = (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.SpeechRecognition) || null;
 let recognition = null;
 let wakeMode = false;
 let manualStop = false;
@@ -357,8 +397,73 @@ if (SpeechRecognition) {
       }, 300);
     }
   };
+} else if (NativeSpeechRecognition) {
+  recognition = createNativeRecognition();
+  setStatus("Toque no núcleo para falar.", "idle");
 } else {
   setStatus("Seu navegador não suporta voz. Use o campo de texto abaixo.", "idle");
+}
+
+function createNativeRecognition() {
+  const plugin = window.Capacitor.Plugins.SpeechRecognition;
+  const rec = {
+    lang: "pt-BR",
+    interimResults: false,
+    maxAlternatives: 3,
+    onstart: null,
+    onresult: null,
+    onerror: null,
+    onend: null,
+    _listening: false,
+    async start() {
+      if (rec._listening) return;
+      try {
+        const perm = await plugin.checkPermissions();
+        if (perm.speechRecognition !== "granted") {
+          const asked = await plugin.requestPermissions();
+          if (asked.speechRecognition !== "granted") {
+            if (rec.onerror) rec.onerror({ error: "not-allowed" });
+            if (rec.onend) rec.onend();
+            return;
+          }
+        }
+      } catch (e) { /* deixa o start falhar naturalmente se der problema */ }
+      rec._listening = true;
+      if (rec.onstart) rec.onstart();
+      try {
+        const result = await plugin.start({
+          language: rec.lang || "pt-BR",
+          maxResults: 3,
+          prompt: "",
+          partialResults: false,
+          popup: false
+        });
+        rec._listening = false;
+        const matches = (result && result.matches) || [];
+        if (matches.length && rec.onresult) {
+          const alts = matches.map((transcript, i) => ({
+            transcript: transcript,
+            confidence: result.confidences ? (result.confidences[i] || 0) : 0.9
+          }));
+          rec.onresult({
+            resultIndex: 0,
+            results: [Object.assign(alts, { isFinal: true })]
+          });
+        }
+        if (rec.onend) rec.onend();
+      } catch (e) {
+        rec._listening = false;
+        if (rec.onerror) rec.onerror({ error: "no-speech" });
+        if (rec.onend) rec.onend();
+      }
+    },
+    stop() {
+      rec._listening = false;
+      try { plugin.stop(); } catch (e) { /* já parado */ }
+    },
+    abort() { rec.stop(); }
+  };
+  return rec;
 }
 
 orb.addEventListener("click", () => {
@@ -548,6 +653,8 @@ async function askGroq() {
             result = JSON.stringify(await getWeather(args.cidade || ""));
           } else if (call.function.name === "get_news") {
             result = JSON.stringify(await getNews(args.assunto || ""));
+          } else if (call.function.name === "get_messages") {
+            result = JSON.stringify(await getMessages());
           } else if (call.function.name === "remember") {
             const fato = (args.fato || "").trim();
             if (fato) {
