@@ -11,6 +11,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -46,3 +48,13 @@ jobs:
         with:
           name: sil-apk
           path: sil-app/android/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Atualizar APK no site (download direto)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          mkdir -p download
+          cp sil-app/android/app/build/outputs/apk/debug/app-debug.apk download/sil.apk
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add download/sil.apk
+          git diff --cached --quiet || (git commit -m "APK da Sil atualizado automaticamente" && git push)

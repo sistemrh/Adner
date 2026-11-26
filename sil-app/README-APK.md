@@ -2,13 +2,13 @@
 
 O APK da Sil é compilado automaticamente pelo GitHub Actions — **não precisa de computador nem do Android Studio**.
 
-## Como baixar o APK
+## Como baixar o APK (direto no celular)
 
-1. Abra https://github.com/sistemrh/Adner/actions (logado na sua conta)
-2. Clique em **Build APK** na lista de execuções
-3. Na seção **Artifacts**, baixe **sil-apk**
-4. Descompacte o zip no celular (ou baixe direto pelo navegador do celular)
-5. Toque no `app-debug.apk` e autorize a instalação ("fonte desconhecida")
+Abra este link no navegador do celular e o download começa:
+
+**https://sistemrh.github.io/Adner/download/sil.apk**
+
+Depois de baixar, toque na notificação de download (ou abra a pasta Downloads) e toque no arquivo para instalar — autorize a "fonte desconhecida".
 
 ## Primeira configuração no celular (uma vez)
 
