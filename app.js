@@ -555,7 +555,7 @@ function voiceSpeed() {
   return parseFloat($("voice-speed").value || "0.95");
 }
 
-const KOKORO_TIMEOUT = 8000;
+const KOKORO_TIMEOUT = 30000;
 
 async function kokoroSpeak(text, voiceId) {
   const tts = await Promise.race([
@@ -602,7 +602,7 @@ async function speak(text) {
     return;
   } catch (err) {
     console.warn("Kokoro indisponível:", err);
-    $("voice-status").textContent = "voz: seu sistema sem voz masculina — Kokoro não carregou; usando voz padrão";
+    $("voice-status").textContent = "voz: Alex (masculina) ainda baixando — esta resposta sai na voz temporária";
   }
   browserSpeak(clean);
 }
@@ -610,6 +610,10 @@ async function speak(text) {
 $("voice-select").value = localStorage.getItem("adner_voice") || "auto";
 $("voice-speed").value = localStorage.getItem("adner_speed") || "0.95";
 $("speed-label").textContent = (+$("voice-speed").value).toFixed(2).replace(/0$/, "");
+{
+  const v = localStorage.getItem("adner_voice") || "auto";
+  if (v === "auto" || v.startsWith("kokoro:")) loadKokoro().catch(() => {});
+}
 $("voice-select").addEventListener("change", () => {
   localStorage.setItem("adner_voice", $("voice-select").value);
   speak("Olá! Esta é minha voz agora.");
