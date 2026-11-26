@@ -30,10 +30,43 @@ const SYSTEM_PROMPT = [
   "Responda sempre em português do Brasil, de forma curta e natural para ser falada em voz alta.",
   "Nunca se apresente, nunca diga que é uma assistente, assistente de voz ou IA, e não fale de si mesma desnecessariamente.",
   "Vá direto ao ponto, como um mordomo experiente que já conhece o patrão há anos.",
+  "Trate o usuário pelo nome Claudio.",
   "Evite listas, markdown e emojis: suas respostas serão lidas em voz alta por um sintetizador.",
+  "Você tem uma memória de longo prazo sobre Claudio, listada neste prompt. Use-a naturalmente, sem anunciar que está consultando memória.",
+  "Quando Claudio pedir para anotar, tomar nota, guardar ou lembrar de algo, use a ferramenta remember e confirme em uma frase curta.",
+  "Quando Claudio pedir para esquecer ou apagar algo, use a ferramenta forget e confirme.",
   "Para perguntas sobre o tempo, use a ferramenta get_weather. Se não souberem a cidade, pergunte apenas qual cidade.",
   "Você sabe a data e a hora atuais porque elas são informadas neste prompt. Use-as sem hesitar."
 ].join(" ");
+
+const MEMORY_KEY = "sil-memories";
+const SEED_FLAG = "sil-seeded-v1";
+const MEMORY_SEED = [
+  "O usuário se chama Claudivino dos Santos Silva, mas deve ser chamado sempre de Claudio.",
+  "Data de nascimento do Claudio: 08/10/1985.",
+  "Esposa do Claudio: Roseane dos Santos Costa, nascida em 31/01/1988.",
+  "Filha do Claudio: Maria Alice dos Santos Silva, nascida em 10/05/2023.",
+  "Rotina da manhã: levar Maria Alice à escola entre 7:00 e 7:40, voltar para casa, se arrumar e ir trabalhar.",
+  "Às terças e quintas: colocar o lixo para fora antes de ir trabalhar."
+];
+
+let memories = [];
+try { memories = JSON.parse(localStorage.getItem(MEMORY_KEY)) || []; } catch (e) { memories = []; }
+
+function saveMemories() {
+  localStorage.setItem(MEMORY_KEY, JSON.stringify(memories));
+}
+
+if (!localStorage.getItem(SEED_FLAG)) {
+  const existing = new Set(memories.map(m => m.text.toLowerCase()));
+  MEMORY_SEED.forEach(text => {
+    if (!existing.has(text.toLowerCase())) {
+      memories.push({ text: text, em: new Date().toISOString() });
+    }
+  });
+  saveMemories();
+  localStorage.setItem(SEED_FLAG, "1");
+}
 
 const TOOLS = [
   {
@@ -47,6 +80,34 @@ const TOOLS = [
           cidade: { type: "string", description: "Nome da cidade, ex.: São Paulo" }
         },
         required: ["cidade"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "remember",
+      description: "Guarda uma informação na memória de longo prazo sobre Claudio, sua família, rotinas, preferências ou compromissos",
+      parameters: {
+        type: "object",
+        properties: {
+          fato: { type: "string", description: "A informação a ser guardada, escrita de forma clara e completa" }
+        },
+        required: ["fato"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "forget",
+      description: "Apaga da memória informações que correspondam à consulta",
+      parameters: {
+        type: "object",
+        properties: {
+          consulta: { type: "string", description: "Palavras-chave do que deve ser apagado" }
+        },
+        required: ["consulta"]
       }
     }
   }
@@ -264,10 +325,16 @@ function injectDateTime() {
     minute: "2-digit",
     timeZone: "America/Sao_Paulo"
   });
-  history[0] = {
-    role: "system",
-    content: SYSTEM_PROMPT + `\n\nData e hora atuais: ${formatted} (horário de Brasília).`
-  };
+  let context = SYSTEM_PROMPT + `\n\nData e hora atuais: ${formatted} (horário de Brasília).`;
+  if (memories.length) {
+    context += "\n\nMemórias de longo prazo sobre Claudio:\n" + memories.map(m => {
+      const quando = m.em ? new Date(m.em).toLocaleDateString("pt-BR") : "";
+      return `- ${quando ? "(" + quando + ") " : ""}${m.text}`;
+    }).join("\n");
+  } else {
+    context += "\n\nA memória de longo prazo está vazia.";
+  }
+  history[0] = { role: "system", content: context };
 }
 
 async function askGroq() {
@@ -309,9 +376,27 @@ async function askGroq() {
           const args = JSON.parse(call.function.arguments || "{}");
           if (call.function.name === "get_weather") {
             result = JSON.stringify(await getWeather(args.cidade || ""));
+          } else if (call.function.name === "remember") {
+            const fato = (args.fato || "").trim();
+            if (fato) {
+              memories.push({ text: fato, em: new Date().toISOString() });
+              saveMemories();
+              result = JSON.stringify({ ok: true, total: memories.length });
+            } else {
+              result = JSON.stringify({ ok: false, erro: "Fato vazio." });
+            }
+          } else if (call.function.name === "forget") {
+            const terms = (args.consulta || "").toLowerCase().split(/\s+/).filter(t => t.length > 2);
+            const before = memories.length;
+            memories = memories.filter(m => {
+              const hay = m.text.toLowerCase();
+              return !terms.some(t => hay.includes(t));
+            });
+            saveMemories();
+            result = JSON.stringify({ ok: true, removidas: before - memories.length });
           }
         } catch (e) {
-          result = JSON.stringify({ erro: "Não consegui obter os dados." });
+          result = JSON.stringify({ erro: "Não consegui executar a operação." });
         }
         history.push({ role: "tool", tool_call_id: call.id, content: result });
       }
