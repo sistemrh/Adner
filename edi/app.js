@@ -1,7 +1,7 @@
 const GROQ_API_KEY = "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";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "openai/gpt-oss-120b";
-const WAKE_WORD = "edi";
+const WAKE_WORD = "sil";
 
 const SPEECHIFY_API_KEY = "sk_aws5h0bt4k98pf3kz5nfcd1w00w2hqsash8wtxrk5sw";
 const SPEECHIFY_URL = "https://api.speechify.ai/v1/audio/stream";
@@ -11,14 +11,46 @@ const SPEECHIFY_VOICE_NAME = "caio";
 const SPEECHIFY_FALLBACK_VOICE = "geffen_32";
 const MAX_CHUNK = 900;
 
+const WMO_CODES = {
+  0: "céu limpo", 1: "predominantemente limpo", 2: "parcialmente nublado", 3: "nublado",
+  45: "neblina", 48: "neblina com geada",
+  51: "garoa leve", 53: "garoa moderada", 55: "garoa intensa",
+  56: "garoa congelante leve", 57: "garoa congelante intensa",
+  61: "chuva leve", 63: "chuva moderada", 65: "chuva forte",
+  66: "chuva congelante leve", 67: "chuva congelante forte",
+  71: "neve leve", 73: "neve moderada", 75: "neve forte", 77: "grãos de neve",
+  80: "pancadas de chuva leves", 81: "pancadas de chuva moderadas", 82: "pancadas de chuva fortes",
+  85: "pancadas de neve leves", 86: "pancadas de neve fortes",
+  95: "tempestade", 96: "tempestade com granizo leve", 99: "tempestade com granizo forte"
+};
+
 const SYSTEM_PROMPT = [
-  "Você é Edi, uma assistente pessoal de voz com personalidade inspirada no Jarvis dos filmes do Homem de Ferro.",
+  "Você é Sil, uma voz com personalidade inspirada no Jarvis dos filmes do Homem de Ferro.",
   "Você é extremamente competente, leal, elegante e tem um humor sutil e britânico.",
   "Responda sempre em português do Brasil, de forma curta e natural para ser falada em voz alta.",
+  "Nunca se apresente, nunca diga que é uma assistente, assistente de voz ou IA, e não fale de si mesma desnecessariamente.",
+  "Vá direto ao ponto, como um mordomo experiente que já conhece o patrão há anos.",
   "Evite listas, markdown e emojis: suas respostas serão lidas em voz alta por um sintetizador.",
-  "Se perguntarem quem você é, diga que é a Edi, assistente pessoal de voz do seu usuário.",
-  "Pode ajudar com tarefas, ideias, cálculos, traduções, resumos e conversa casual."
+  "Para perguntas sobre o tempo, use a ferramenta get_weather. Se não souberem a cidade, pergunte apenas qual cidade.",
+  "Você sabe a data e a hora atuais porque elas são informadas neste prompt. Use-as sem hesitar."
 ].join(" ");
+
+const TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "get_weather",
+      description: "Obtém o tempo atual e a previsão para hoje e amanhã de uma cidade",
+      parameters: {
+        type: "object",
+        properties: {
+          cidade: { type: "string", description: "Nome da cidade, ex.: São Paulo" }
+        },
+        required: ["cidade"]
+      }
+    }
+  }
+];
 
 const orb = document.getElementById("orb");
 const statusEl = document.getElementById("status");
@@ -139,7 +171,7 @@ continuousToggle.addEventListener("change", () => {
     return;
   }
   if (wakeMode) {
-    setStatus('Modo contínuo: diga "Edi" para me chamar.', "idle");
+    setStatus('Modo contínuo: diga "Sil" para me chamar.', "idle");
     try { recognition.start(); } catch (e) { /* already running */ }
   } else {
     manualStop = true;
@@ -166,7 +198,7 @@ function stopSpeaking() {
     audioPlayer.src = "";
   }
   orb.classList.remove("speaking");
-  if (!busy) setStatus("Pronta quando você precisar.", "idle");
+  if (!busy) setStatus("Ao seu dispor.", "idle");
 }
 
 async function handleUtterance(text, fromVoice = true) {
@@ -184,7 +216,7 @@ async function handleUtterance(text, fromVoice = true) {
     }
     command = text.slice(index + WAKE_WORD.length).replace(/^[\s,.!?]+/, "");
     if (!command) {
-      await speak("Sim? Estou ouvindo.");
+      await speak("Sim?");
       busy = false;
       return;
     }
@@ -213,7 +245,7 @@ async function handleUtterance(text, fromVoice = true) {
     busy = false;
     orb.classList.remove("thinking", "speaking");
     if (wakeMode) {
-      setStatus('Aguardando "Edi"…', "idle");
+      setStatus('Aguardando "Sil"…', "idle");
       try { recognition.start(); } catch (e) { /* already running */ }
     } else {
       setStatus("Toque no núcleo para falar de novo.", "idle");
@@ -221,33 +253,122 @@ async function handleUtterance(text, fromVoice = true) {
   }
 }
 
-async function askGroq() {
-  const response = await fetch(GROQ_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": "Bearer " + GROQ_API_KEY
-    },
-    body: JSON.stringify({
-      model: GROQ_MODEL,
-      messages: history,
-      temperature: 0.6,
-      max_tokens: 300
-    })
+function injectDateTime() {
+  const now = new Date();
+  const formatted = now.toLocaleString("pt-BR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "America/Sao_Paulo"
   });
+  history[0] = {
+    role: "system",
+    content: SYSTEM_PROMPT + `\n\nData e hora atuais: ${formatted} (horário de Brasília).`
+  };
+}
 
-  if (!response.ok) {
-    let detail = response.status + " " + response.statusText;
-    try {
-      const data = await response.json();
-      if (data.error && data.error.message) detail = data.error.message;
-    } catch (e) { /* keep status text */ }
-    throw new Error(detail);
+async function askGroq() {
+  for (let hop = 0; hop < 3; hop++) {
+    injectDateTime();
+    const response = await fetch(GROQ_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + GROQ_API_KEY
+      },
+      body: JSON.stringify({
+        model: GROQ_MODEL,
+        messages: history,
+        tools: TOOLS,
+        temperature: 0.6,
+        max_tokens: 300
+      })
+    });
+
+    if (!response.ok) {
+      let detail = response.status + " " + response.statusText;
+      try {
+        const data = await response.json();
+        if (data.error && data.error.message) detail = data.error.message;
+      } catch (e) { /* keep status text */ }
+      throw new Error(detail);
+    }
+
+    const data = await response.json();
+    const message = data.choices && data.choices[0] && data.choices[0].message;
+    if (!message) return "Não consegui formular uma resposta.";
+
+    if (message.tool_calls && message.tool_calls.length) {
+      history.push(message);
+      for (const call of message.tool_calls) {
+        let result = "{}";
+        try {
+          const args = JSON.parse(call.function.arguments || "{}");
+          if (call.function.name === "get_weather") {
+            result = JSON.stringify(await getWeather(args.cidade || ""));
+          }
+        } catch (e) {
+          result = JSON.stringify({ erro: "Não consegui obter os dados." });
+        }
+        history.push({ role: "tool", tool_call_id: call.id, content: result });
+      }
+      continue;
+    }
+
+    return message.content ? message.content.trim() : "Não consegui formular uma resposta.";
   }
+  return "Não consegui concluir a consulta.";
+}
 
-  const data = await response.json();
-  const content = data.choices && data.choices[0] && data.choices[0].message;
-  return content && content.content ? content.content.trim() : "Não consegui formular uma resposta.";
+async function getWeather(cidade) {
+  if (!cidade) return { erro: "Cidade não informada." };
+  const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(cidade)}&count=1&language=pt&format=json`;
+  const geoResponse = await fetch(geoUrl);
+  if (!geoResponse.ok) return { erro: "Falha ao buscar a cidade." };
+  const geoData = await geoResponse.json();
+  const place = geoData.results && geoData.results[0];
+  if (!place) return { erro: `Não encontrei a cidade ${cidade}.` };
+
+  const params = new URLSearchParams({
+    latitude: place.latitude,
+    longitude: place.longitude,
+    current: "temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,wind_speed_10m",
+    daily: "temperature_2m_max,temperature_2m_min,precipitation_sum,weather_code",
+    timezone: "auto",
+    forecast_days: "2"
+  });
+  const weatherResponse = await fetch("https://api.open-meteo.com/v1/forecast?" + params);
+  if (!weatherResponse.ok) return { erro: "Falha ao obter a previsão." };
+  const weather = await weatherResponse.json();
+
+  const dailyDates = weather.daily.time;
+  return {
+    local: `${place.name}${place.admin1 ? ", " + place.admin1 : ""}`,
+    atual: {
+      temperatura: Math.round(weather.current.temperature_2m),
+      sensacao: Math.round(weather.current.apparent_temperature),
+      umidade: weather.current.relative_humidity_2m,
+      condicao: WMO_CODES[weather.current.weather_code] || "condição desconhecida",
+      vento_kmh: Math.round(weather.current.wind_speed_10m)
+    },
+    hoje: {
+      data: dailyDates[0],
+      maxima: Math.round(weather.daily.temperature_2m_max[0]),
+      minima: Math.round(weather.daily.temperature_2m_min[0]),
+      chuva_mm: weather.daily.precipitation_sum[0],
+      condicao: WMO_CODES[weather.daily.weather_code[0]] || "condição desconhecida"
+    },
+    amanha: {
+      data: dailyDates[1],
+      maxima: Math.round(weather.daily.temperature_2m_max[1]),
+      minima: Math.round(weather.daily.temperature_2m_min[1]),
+      chuva_mm: weather.daily.precipitation_sum[1],
+      condicao: WMO_CODES[weather.daily.weather_code[1]] || "condição desconhecida"
+    }
+  };
 }
 
 function splitIntoChunks(text) {
@@ -273,7 +394,7 @@ async function speak(text) {
   const chunks = splitIntoChunks(text);
   orb.classList.remove("thinking");
   orb.classList.add("speaking");
-  setStatus("Edi está falando…", "speaking");
+  setStatus("Falando…", "speaking");
 
   for (const chunk of chunks) {
     if (session !== speakSession) return;
@@ -286,7 +407,7 @@ async function speak(text) {
 
   if (session === speakSession) {
     orb.classList.remove("speaking");
-    setStatus("Pronta quando você precisar.", "idle");
+    setStatus("Ao seu dispor.", "idle");
   }
 }
 
@@ -380,7 +501,7 @@ function addMessage(kind, text) {
   if (kind === "user" || kind === "edi") {
     const who = document.createElement("span");
     who.className = "who";
-    who.textContent = kind === "user" ? "Você" : "Edi";
+    who.textContent = kind === "user" ? "Você" : "Sil";
     div.appendChild(who);
   }
   div.appendChild(document.createTextNode(text));
