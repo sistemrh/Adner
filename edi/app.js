@@ -2,6 +2,7 @@ const GROQ_API_KEY = "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";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "openai/gpt-oss-120b";
 const WAKE_WORD = "sil";
+const WAKE_VARIANTS = ["sil", "syl", "cil", "cyl", "sill", "sile", "syll", "cill", "siril", "cyril", "siri", "sila", "cecil", "sylla", "cila"];
 
 const SPEECHIFY_API_KEY = "sk_aws5h0bt4k98pf3kz5nfcd1w00w2hqsash8wtxrk5sw";
 const SPEECHIFY_URL = "https://api.speechify.ai/v1/audio/stream";
@@ -30,6 +31,7 @@ const SYSTEM_PROMPT = [
   "Responda sempre em português do Brasil, de forma curta e natural para ser falada em voz alta.",
   "Nunca se apresente, nunca diga que é uma assistente, assistente de voz ou IA, e não fale de si mesma desnecessariamente.",
   "Vá direto ao ponto, como um mordomo experiente que já conhece o patrão há anos.",
+  "Você ouve por reconhecimento de voz, que às vezes erra: se o que ouviu parecer confuso, incompleto ou sem sentido, peça com educação para repetir em vez de inventar uma resposta.",
   "Trate o usuário pelo nome Claudio.",
   "Seja educada e formal ao se dirigir a pessoas: use senhor para um homem e senhora para uma mulher, por exemplo boa noite senhor ou boa noite senhora. Com o Claudio, que é homem, use senhor em saudações e agradecimentos sem exagerar na repetição.",
   "Evite listas, markdown e emojis: suas respostas serão lidas em voz alta por um sintetizador.",
@@ -199,6 +201,49 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  let prev = Array.from({ length: n + 1 }, (_, i) => i);
+  for (let i = 1; i <= m; i++) {
+    const curr = [i];
+    for (let j = 1; j <= n; j++) {
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = curr;
+  }
+  return prev[n];
+}
+
+function normalizeWord(word) {
+  return word.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z]/g, "");
+}
+
+function matchesWake(word) {
+  if (!word) return false;
+  if (WAKE_VARIANTS.includes(word)) return true;
+  if (word.length >= 4) {
+    return WAKE_VARIANTS.some(v => levenshtein(word, v) <= 1);
+  }
+  return false;
+}
+
+function extractCommand(alternatives) {
+  for (const text of alternatives) {
+    const words = text.trim().split(/\s+/).filter(Boolean);
+    const limit = Math.min(words.length, 2);
+    for (let i = 0; i < limit; i++) {
+      if (matchesWake(normalizeWord(words[i]))) {
+        const lower = text.toLowerCase();
+        const idx = lower.indexOf(words[i].toLowerCase());
+        return text.slice(idx + words[i].length).replace(/^[\s,.!?;:]+/, "").trim();
+      }
+    }
+  }
+  return null;
+}
+
 async function discoverSpeechifyVoice() {
   const variants = [
     "?type=shared&locale=pt-BR&limit=200",
@@ -230,19 +275,29 @@ if (SpeechRecognition) {
   recognition = new SpeechRecognition();
   recognition.lang = "pt-BR";
   recognition.interimResults = true;
-  recognition.maxAlternatives = 1;
+  recognition.maxAlternatives = 3;
   recognition.continuous = false;
 
   recognition.onstart = () => setStatus("Ouvindo… fale agora", "listening");
   recognition.onresult = (event) => {
     let finalText = "";
     let interimText = "";
+    let confidence = 0;
+    const alternatives = [];
     for (let i = event.resultIndex; i < event.results.length; i++) {
-      const transcript = event.results[i][0].transcript;
-      if (event.results[i].isFinal) finalText += transcript;
-      else interimText += transcript;
+      const result = event.results[i];
+      if (result.isFinal) {
+        finalText += result[0].transcript;
+        confidence = Math.max(confidence, result[0].confidence || 0);
+        for (let j = 0; j < result.length; j++) {
+          const alt = result[j].transcript.trim();
+          if (alt && !alternatives.includes(alt)) alternatives.push(alt);
+        }
+      } else {
+        interimText += result[0].transcript;
+      }
     }
-    if (finalText.trim()) handleUtterance(finalText.trim());
+    if (finalText.trim()) handleUtterance(finalText.trim(), true, confidence, alternatives);
     else if (interimText.trim()) setStatus(`“${interimText.trim()}”`, "listening");
   };
   recognition.onerror = (event) => {
@@ -259,8 +314,12 @@ if (SpeechRecognition) {
   };
   recognition.onend = () => {
     if (!busy) orb.classList.remove("listening");
-    if (wakeMode && !busy) {
-      try { recognition.start(); } catch (e) { /* already started */ }
+    if (wakeMode && !busy && !manualStop) {
+      setTimeout(() => {
+        if (wakeMode && !busy) {
+          try { recognition.start(); } catch (e) { /* already started */ }
+        }
+      }, 300);
     }
   };
 } else {
@@ -322,25 +381,37 @@ function stopSpeaking() {
   if (!busy) setStatus("Ao seu dispor.", "idle");
 }
 
-async function handleUtterance(text, fromVoice = true) {
+async function handleUtterance(text, fromVoice = true, confidence = 0, alternatives = null) {
   if (busy) return;
   busy = true;
   manualStop = false;
 
   let command = text;
   if (fromVoice && wakeMode) {
-    const lower = text.toLowerCase();
-    const index = lower.indexOf(WAKE_WORD);
-    if (index === -1) {
+    command = extractCommand(alternatives || [text]);
+    if (command === null) {
       busy = false;
       return;
     }
-    command = text.slice(index + WAKE_WORD.length).replace(/^[\s,.!?]+/, "");
     if (!command) {
-      await speak("Sim?");
+      await speak("Pois não, senhor?");
       busy = false;
       return;
     }
+  }
+
+  if (fromVoice && confidence > 0 && confidence < 0.35) {
+    addMessage("user", text);
+    await speak("Desculpe, não consegui entender bem. Pode repetir, senhor?");
+    busy = false;
+    orb.classList.remove("thinking", "speaking");
+    if (wakeMode) {
+      setStatus('Aguardando "Sil"…', "idle");
+      try { recognition.start(); } catch (e) { /* already running */ }
+    } else {
+      setStatus("Toque no núcleo para falar de novo.", "idle");
+    }
+    return;
   }
 
   addMessage("user", text);
