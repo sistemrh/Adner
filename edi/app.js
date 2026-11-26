@@ -17,6 +17,7 @@ const STREAM_ELEMENTS_URL = "https://api.streamelements.com/kappa/v2/speech";
 const ELEVEN_URL = "https://api.elevenlabs.io/v1/text-to-speech/";
 const ELEVEN_VOICE_ID = "ErXwobaYiN019PkySvjV";
 const ELEVEN_MODEL = "eleven_multilingual_v2";
+const ELEVEN_DEFAULT_KEY = "sk_1c4bb0ec01544ceb04242958ad2585db7c1c7ede523c4c35";
 const ELEVEN_OPTION = { id: "eleven-antoni", label: "Antoni — masculina natural (ElevenLabs)", gender: "M" };
 const SPEECHIFY_API_KEY = "sk_aws5h0bt4k98pf3kz5nfcd1w00w2hqsash8wtxrk5sw";
 const SPEECHIFY_URL = "https://api.speechify.ai/v1/audio/stream";
@@ -64,7 +65,7 @@ let speechifyVoices = [{ id: SPEECHIFY_FALLBACK_VOICE, name: "voz padrão", gend
 SPEECHIFY_GENDER[SPEECHIFY_FALLBACK_VOICE] = "M";
 
 function getElevenKey() {
-  return (localStorage.getItem("edi-elevenlabs-key") || "").trim();
+  return (localStorage.getItem("edi-elevenlabs-key") || ELEVEN_DEFAULT_KEY).trim();
 }
 
 function populateVoiceSelect(voices, preferredId) {
