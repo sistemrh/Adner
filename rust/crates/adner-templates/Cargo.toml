@@ -1,0 +1,10 @@
+[package]
+name = "adner-templates"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+adner-core = { path = "../adner-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }

@@ -1,0 +1,32 @@
+[package]
+name = "adner-python"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "adner_rust"
+crate-type = ["cdylib"]
+
+[dependencies]
+adner-core = { path = "../adner-core" }
+adner-engine = { path = "../adner-engine" }
+adner-security = { path = "../adner-security" }
+adner-tools = { path = "../adner-tools" }
+adner-agents = { path = "../adner-agents" }
+adner-traces = { path = "../adner-traces" }
+adner-telemetry = { path = "../adner-telemetry" }
+adner-learning = { path = "../adner-learning" }
+adner-mcp = { path = "../adner-mcp" }
+adner-sessions = { path = "../adner-sessions" }
+adner-workflow = { path = "../adner-workflow" }
+adner-skills = { path = "../adner-skills" }
+adner-recipes = { path = "../adner-recipes" }
+adner-templates = { path = "../adner-templates" }
+adner-a2a = { path = "../adner-a2a" }
+adner-scheduler = { path = "../adner-scheduler" }
+pyo3 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+once_cell = { workspace = true }
+parking_lot = { workspace = true }
