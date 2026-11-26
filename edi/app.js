@@ -3,16 +3,16 @@ const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "openai/gpt-oss-120b";
 const WAKE_WORD = "edi";
 
-const TTS_VOICES = [
+const VOICE_CANDIDATES = [
   { id: "pt-BR-Wavenet-A", label: "Ana (Google, neural)", gender: "F" },
   { id: "pt-BR-Standard-A", label: "Alice (Google)", gender: "F" },
   { id: "Vitoria", label: "Vitória (Amazon)", gender: "F" },
-  { id: "pt-BR-Wavenet-C", label: "Marcos (Google, neural, masc.)", gender: "M" },
+  { id: "pt-BR-Chirp3-HD-Charon", label: "Charon (Google HD, masc.)", gender: "M" },
+  { id: "pt-BR-Chirp3-HD-Fenrir", label: "Fenrir (Google HD, masc.)", gender: "M" },
+  { id: "pt-BR-Wavenet-C", label: "Marcos (Google, masc.)", gender: "M" },
   { id: "pt-BR-Standard-C", label: "Marcelo (Google, masc.)", gender: "M" },
-  { id: "Ricardo", label: "Ricardo (Amazon, masc.)", gender: "M" },
-  { id: "browser", label: "Voz do navegador", gender: "F" }
+  { id: "Ricardo", label: "Ricardo (Amazon, masc.)", gender: "M" }
 ];
-const SE_PTBR_CHAIN = ["pt-BR-Wavenet-A", "pt-BR-Standard-A", "Vitoria", "pt-BR-Wavenet-C", "pt-BR-Standard-C", "Ricardo"];
 const STREAM_ELEMENTS_URL = "https://api.streamelements.com/kappa/v2/speech";
 const MAX_CHUNK = 900;
 
@@ -45,19 +45,78 @@ let manualStop = false;
 let busy = false;
 let audioPlayer = new Audio();
 let speakSession = 0;
+let workingVoices = [];
 
-TTS_VOICES.forEach(v => {
-  const option = document.createElement("option");
-  option.value = v.id;
-  option.textContent = v.label;
-  voiceSelect.appendChild(option);
-});
-const savedVoice = localStorage.getItem("edi-voice");
-voiceSelect.value = TTS_VOICES.some(v => v.id === savedVoice) ? savedVoice : "pt-BR-Wavenet-A";
+function populateVoiceSelect(voices, preferredId) {
+  const previous = preferredId || voiceSelect.value;
+  voiceSelect.innerHTML = "";
+  const browserOption = document.createElement("option");
+  browserOption.value = "browser";
+  browserOption.textContent = voices.length === 0
+    ? "Voz do navegador (nenhuma voz remota disponível)"
+    : "Voz do navegador";
+  if (voices.length === 0) {
+    voiceSelect.appendChild(browserOption);
+    voiceSelect.value = "browser";
+    return;
+  }
+  voices.forEach(v => {
+    const option = document.createElement("option");
+    option.value = v.id;
+    option.textContent = v.label + " ✓";
+    voiceSelect.appendChild(option);
+  });
+  voiceSelect.appendChild(browserOption);
+  const savedVoice = localStorage.getItem("edi-voice");
+  const validIds = voices.map(v => v.id).concat(["browser"]);
+  if (previous && validIds.includes(previous)) voiceSelect.value = previous;
+  else if (savedVoice && validIds.includes(savedVoice)) voiceSelect.value = savedVoice;
+  else {
+    const female = voices.find(v => v.gender === "F");
+    voiceSelect.value = (female || voices[0]).id;
+  }
+}
+
+populateVoiceSelect(VOICE_CANDIDATES, null);
 voiceSelect.addEventListener("change", () => {
   localStorage.setItem("edi-voice", voiceSelect.value);
   stopSpeaking();
 });
+
+async function probeVoice(id) {
+  return new Promise((resolve) => {
+    const audio = new Audio();
+    const url = `${STREAM_ELEMENTS_URL}?voice=${encodeURIComponent(id)}&text=${encodeURIComponent("Olá.")}`;
+    let done = false;
+    const finish = (ok) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      audio.oncanplaythrough = null;
+      audio.onerror = null;
+      resolve(ok);
+    };
+    const timer = setTimeout(() => finish(false), 6000);
+    audio.oncanplaythrough = () => finish(true);
+    audio.onerror = () => finish(false);
+    audio.preload = "auto";
+    audio.src = url;
+    audio.load();
+  });
+}
+
+async function discoverVoices() {
+  const found = [];
+  for (let i = 0; i < VOICE_CANDIDATES.length; i++) {
+    const candidate = VOICE_CANDIDATES[i];
+    if (!busy) setStatus(`Testando vozes… (${i + 1}/${VOICE_CANDIDATES.length})`, "idle");
+    if (await probeVoice(candidate.id)) found.push(candidate);
+  }
+  workingVoices = found;
+  populateVoiceSelect(found, voiceSelect.value);
+  if (!busy && !orb.classList.contains("listening")) setStatus("Pronta quando você precisar.", "idle");
+}
+discoverVoices();
 
 if (SpeechRecognition) {
   recognition = new SpeechRecognition();
@@ -267,13 +326,14 @@ async function speak(text) {
     if (voiceId === "browser") {
       await speakWithBrowser(chunk, session);
     } else {
-      const selected = TTS_VOICES.find(v => v.id === voiceId) || TTS_VOICES[0];
-      const sameGender = SE_PTBR_CHAIN.filter(id => {
-        const info = TTS_VOICES.find(v => v.id === id);
-        return id !== voiceId && info && info.gender === selected.gender;
+      const selected = VOICE_CANDIDATES.find(v => v.id === voiceId) || VOICE_CANDIDATES[0];
+      const chain = [voiceId];
+      workingVoices.forEach(v => {
+        if (v.id !== voiceId && v.gender === selected.gender) chain.push(v.id);
       });
-      const others = SE_PTBR_CHAIN.filter(id => !sameGender.includes(id) && id !== voiceId);
-      const chain = [voiceId, ...sameGender, ...others];
+      workingVoices.forEach(v => {
+        if (v.id !== voiceId && v.gender !== selected.gender) chain.push(v.id);
+      });
       let spoken = false;
       for (const candidate of chain) {
         if (session !== speakSession) return;
@@ -299,7 +359,6 @@ function speakWithStreamElements(text, voiceId, session) {
     const player = new Audio();
     audioPlayer = player;
     let settled = false;
-    let timedOut = false;
     const finish = (ok) => {
       if (settled) return;
       settled = true;
@@ -308,13 +367,9 @@ function speakWithStreamElements(text, voiceId, session) {
       if (!ok) { player.pause(); player.src = ""; }
       resolve(ok);
     };
-    const timeout = setTimeout(() => { timedOut = true; finish(false); }, 10000);
+    const timeout = setTimeout(() => finish(false), 10000);
     player.onended = () => { clearTimeout(timeout); finish(true); };
     player.onerror = () => { clearTimeout(timeout); finish(false); };
-    const timeoutCheck = setInterval(() => {
-      if (timedOut) clearInterval(timeoutCheck);
-      else if (!player.paused && player.currentTime > 0) { clearInterval(timeoutCheck); clearTimeout(timeout); }
-    }, 500);
     player.src = url;
     player.play().catch(() => { clearTimeout(timeout); finish(false); });
   });
@@ -327,12 +382,13 @@ function speakWithBrowser(text, session, isFallback = false, gender = "F") {
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = "pt-BR";
     utterance.rate = isFallback ? 1.05 : 1.02;
-    utterance.pitch = 1;
+    utterance.pitch = gender === "M" ? 0.7 : 1;
     const voices = window.speechSynthesis.getVoices();
     const ptVoices = voices.filter(v => v.lang && v.lang.toLowerCase().replace("_", "-").startsWith("pt-br")
       || (v.lang && v.lang.toLowerCase().startsWith("pt")));
-    const matchGender = gender === "M" ? /ricardo|antonio|thiago|homer|daniel|felipe|male|masculin/i : /natural|neural|francisca|luciana|maria|camila|female|feminin/i;
-    const natural = ptVoices.find(v => matchGender.test(v.name))
+    const matchGender = gender === "M" ? /antonio|thiago|ricardo|homer|daniel|felipe|fabio|male|masculin/i : /natural|neural|francisca|luciana|maria|camila|female|feminin/i;
+    const natural = ptVoices.find(v => /natural/i.test(v.name) && matchGender.test(v.name))
+      || ptVoices.find(v => matchGender.test(v.name))
       || ptVoices.find(v => /natural|neural|google/i.test(v.name))
       || ptVoices[0];
     if (natural) utterance.voice = natural;
