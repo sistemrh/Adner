@@ -4,13 +4,15 @@ const GROQ_MODEL = "openai/gpt-oss-120b";
 const WAKE_WORD = "edi";
 
 const TTS_VOICES = [
-  { id: "Camila", label: "Camila (Amazon, neural)" },
-  { id: "Vitoria", label: "Vitória (Amazon, neural)" },
-  { id: "Ricardo", label: "Ricardo (Amazon, neural)" },
+  { id: "pt-BR-Wavenet-A", label: "Ana (Google, neural)" },
+  { id: "pt-BR-Standard-A", label: "Alice (Google)" },
+  { id: "Vitoria", label: "Vitória (Amazon)" },
+  { id: "Ricardo", label: "Ricardo (Amazon)" },
   { id: "browser", label: "Voz do navegador" }
 ];
+const SE_PTBR_CHAIN = ["pt-BR-Wavenet-A", "pt-BR-Standard-A", "Vitoria", "Ricardo"];
 const STREAM_ELEMENTS_URL = "https://api.streamelements.com/kappa/v2/speech";
-const MAX_CHUNK = 450;
+const MAX_CHUNK = 900;
 
 const SYSTEM_PROMPT = [
   "Você é Edi, uma assistente pessoal de voz com personalidade inspirada no Jarvis dos filmes do Homem de Ferro.",
@@ -48,8 +50,8 @@ TTS_VOICES.forEach(v => {
   option.textContent = v.label;
   voiceSelect.appendChild(option);
 });
-voiceSelect.value = localStorage.getItem("edi-voice") || "Camila";
-if (!voiceSelect.value) voiceSelect.value = "Camila";
+const savedVoice = localStorage.getItem("edi-voice");
+voiceSelect.value = TTS_VOICES.some(v => v.id === savedVoice) ? savedVoice : "pt-BR-Wavenet-A";
 voiceSelect.addEventListener("change", () => {
   localStorage.setItem("edi-voice", voiceSelect.value);
   stopSpeaking();
@@ -263,8 +265,16 @@ async function speak(text) {
     if (voiceId === "browser") {
       await speakWithBrowser(chunk, session);
     } else {
-      const ok = await speakWithStreamElements(chunk, voiceId, session);
-      if (!ok) await speakWithBrowser(chunk, session, true);
+      const chain = [voiceId, ...SE_PTBR_CHAIN.filter(v => v !== voiceId)];
+      let spoken = false;
+      for (const candidate of chain) {
+        if (session !== speakSession) return;
+        if (await speakWithStreamElements(chunk, candidate, session)) {
+          spoken = true;
+          break;
+        }
+      }
+      if (!spoken) await speakWithBrowser(chunk, session, true);
     }
     if (session !== speakSession) return;
   }
@@ -278,17 +288,27 @@ async function speak(text) {
 function speakWithStreamElements(text, voiceId, session) {
   return new Promise((resolve) => {
     const url = `${STREAM_ELEMENTS_URL}?voice=${encodeURIComponent(voiceId)}&text=${encodeURIComponent(text)}`;
-    const player = new Audio(url);
+    const player = new Audio();
     audioPlayer = player;
     let settled = false;
+    let timedOut = false;
     const finish = (ok) => {
       if (settled) return;
       settled = true;
+      player.onended = null;
+      player.onerror = null;
+      if (!ok) { player.pause(); player.src = ""; }
       resolve(ok);
     };
-    player.onended = () => finish(true);
-    player.onerror = () => finish(false);
-    player.play().catch(() => finish(false));
+    const timeout = setTimeout(() => { timedOut = true; finish(false); }, 10000);
+    player.onended = () => { clearTimeout(timeout); finish(true); };
+    player.onerror = () => { clearTimeout(timeout); finish(false); };
+    const timeoutCheck = setInterval(() => {
+      if (timedOut) clearInterval(timeoutCheck);
+      else if (!player.paused && player.currentTime > 0) { clearInterval(timeoutCheck); clearTimeout(timeout); }
+    }, 500);
+    player.src = url;
+    player.play().catch(() => { clearTimeout(timeout); finish(false); });
   });
 }
 
