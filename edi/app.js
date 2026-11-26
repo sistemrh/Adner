@@ -39,33 +39,92 @@ const SYSTEM_PROMPT = [
   "Você sabe a data e a hora atuais porque elas são informadas neste prompt. Use-as sem hesitar."
 ].join(" ");
 
+const SUPABASE_URL = "https://sqbzrwjctudhktfgdnkn.supabase.co";
+const SUPABASE_KEY = "sb_publishable_TOLM_QG6OEuogwUG5D6PKw_8dm-SJ6s";
+const MEMORY_TABLE = "memories";
 const MEMORY_KEY = "sil-memories";
-const SEED_FLAG = "sil-seeded-v1";
-const MEMORY_SEED = [
-  "O usuário se chama Claudivino dos Santos Silva, mas deve ser chamado sempre de Claudio.",
-  "Data de nascimento do Claudio: 08/10/1985.",
-  "Esposa do Claudio: Roseane dos Santos Costa, nascida em 31/01/1988.",
-  "Filha do Claudio: Maria Alice dos Santos Silva, nascida em 10/05/2023.",
-  "Rotina da manhã: levar Maria Alice à escola entre 7:00 e 7:40, voltar para casa, se arrumar e ir trabalhar.",
-  "Às terças e quintas: colocar o lixo para fora antes de ir trabalhar."
-];
 
 let memories = [];
 try { memories = JSON.parse(localStorage.getItem(MEMORY_KEY)) || []; } catch (e) { memories = []; }
+let memoryOnline = false;
 
 function saveMemories() {
   localStorage.setItem(MEMORY_KEY, JSON.stringify(memories));
 }
 
-if (!localStorage.getItem(SEED_FLAG)) {
-  const existing = new Set(memories.map(m => m.text.toLowerCase()));
-  MEMORY_SEED.forEach(text => {
-    if (!existing.has(text.toLowerCase())) {
-      memories.push({ text: text, em: new Date().toISOString() });
+async function supabaseRequest(path, options = {}) {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    ...options,
+    headers: {
+      "apikey": SUPABASE_KEY,
+      "Authorization": "Bearer " + SUPABASE_KEY,
+      "Content-Type": "application/json",
+      ...(options.headers || {})
     }
   });
+  if (!response.ok) {
+    const error = new Error("Supabase " + response.status);
+    error.status = response.status;
+    throw error;
+  }
+  return response;
+}
+
+async function loadMemories() {
+  try {
+    const response = await supabaseRequest(`${MEMORY_TABLE}?select=text,em&order=em.asc`);
+    const rows = await response.json();
+    const remote = rows.map(r => ({ text: r.text, em: r.em }));
+    memoryOnline = true;
+    const known = new Set(remote.map(m => m.text.toLowerCase()));
+    const localOnly = memories.filter(m => !known.has(m.text.toLowerCase()));
+    memories = remote;
+    for (const item of localOnly) {
+      try {
+        await supabaseRequest(MEMORY_TABLE, {
+          method: "POST",
+          body: JSON.stringify(item),
+          headers: { "Prefer": "return=minimal" }
+        });
+        memories.push(item);
+      } catch (e) { /* keeps item local only */ }
+    }
+  } catch (e) {
+    memoryOnline = false;
+  }
   saveMemories();
-  localStorage.setItem(SEED_FLAG, "1");
+}
+loadMemories();
+
+async function rememberFact(fato) {
+  const item = { text: fato, em: new Date().toISOString() };
+  memories.push(item);
+  saveMemories();
+  if (memoryOnline) {
+    try {
+      await supabaseRequest(MEMORY_TABLE, {
+        method: "POST",
+        body: JSON.stringify(item),
+        headers: { "Prefer": "return=minimal" }
+      });
+    } catch (e) { /* kept in local cache */ }
+  }
+}
+
+async function forgetFacts(terms) {
+  const before = memories.length;
+  memories = memories.filter(m => {
+    const hay = m.text.toLowerCase();
+    return !terms.some(t => hay.includes(t));
+  });
+  saveMemories();
+  if (memoryOnline && terms.length) {
+    const filter = terms.map(t => `text.ilike.*${encodeURIComponent(t)}*`).join(",");
+    try {
+      await supabaseRequest(`${MEMORY_TABLE}?or=(${filter})`, { method: "DELETE" });
+    } catch (e) { /* cache already updated */ }
+  }
+  return before - memories.length;
 }
 
 const TOOLS = [
@@ -379,21 +438,15 @@ async function askGroq() {
           } else if (call.function.name === "remember") {
             const fato = (args.fato || "").trim();
             if (fato) {
-              memories.push({ text: fato, em: new Date().toISOString() });
-              saveMemories();
+              await rememberFact(fato);
               result = JSON.stringify({ ok: true, total: memories.length });
             } else {
               result = JSON.stringify({ ok: false, erro: "Fato vazio." });
             }
           } else if (call.function.name === "forget") {
             const terms = (args.consulta || "").toLowerCase().split(/\s+/).filter(t => t.length > 2);
-            const before = memories.length;
-            memories = memories.filter(m => {
-              const hay = m.text.toLowerCase();
-              return !terms.some(t => hay.includes(t));
-            });
-            saveMemories();
-            result = JSON.stringify({ ok: true, removidas: before - memories.length });
+            const removidas = await forgetFacts(terms);
+            result = JSON.stringify({ ok: true, removidas: removidas });
           }
         } catch (e) {
           result = JSON.stringify({ erro: "Não consegui executar a operação." });

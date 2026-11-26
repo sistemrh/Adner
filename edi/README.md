@@ -12,6 +12,25 @@ Assistente de voz estilo Jarvis, 100% estático (sem backend), hospedado no GitH
 - **Previsão do tempo:** função `get_weather` via Open-Meteo (gratuita, sem chave) — tempo atual, hoje e amanhã de qualquer cidade.
 - **Fala:** voz masculina natural "Caio" via Speechify API (chave embutida no código, conforme solicitado), com fallback para a síntese de voz do navegador.
 - **Modo contínuo:** ative a opção e diga **"Sil"** para chamá-la sem tocar na tela.
+- **Memória de longo prazo:** banco **Supabase** (tabela `memories`). "Tome nota..." grava, "esqueça..." apaga. Se o Supabase estiver indisponível, usa o cache local do navegador.
+
+## Backend (Supabase)
+
+O navegador usa apenas a chave **publishable** (segura para clientes), protegida por RLS. Para recriar o banco:
+
+```sql
+create table if not exists memories (
+  id uuid primary key default gen_random_uuid(),
+  text text not null,
+  em timestamptz not null default now()
+);
+alter table memories enable row level security;
+create policy "anon read" on memories for select using (true);
+create policy "anon insert" on memories for insert with check (true);
+create policy "anon delete" on memories for delete using (true);
+```
+
+Dados pessoais (família, rotinas) foram **removidos do código público** e vivem apenas no banco Supabase.
 
 ## Como usar
 
