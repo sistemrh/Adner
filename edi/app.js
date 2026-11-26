@@ -4,13 +4,15 @@ const GROQ_MODEL = "openai/gpt-oss-120b";
 const WAKE_WORD = "edi";
 
 const TTS_VOICES = [
-  { id: "pt-BR-Wavenet-A", label: "Ana (Google, neural)" },
-  { id: "pt-BR-Standard-A", label: "Alice (Google)" },
-  { id: "Vitoria", label: "Vitória (Amazon)" },
-  { id: "Ricardo", label: "Ricardo (Amazon)" },
-  { id: "browser", label: "Voz do navegador" }
+  { id: "pt-BR-Wavenet-A", label: "Ana (Google, neural)", gender: "F" },
+  { id: "pt-BR-Standard-A", label: "Alice (Google)", gender: "F" },
+  { id: "Vitoria", label: "Vitória (Amazon)", gender: "F" },
+  { id: "pt-BR-Wavenet-C", label: "Marcos (Google, neural, masc.)", gender: "M" },
+  { id: "pt-BR-Standard-C", label: "Marcelo (Google, masc.)", gender: "M" },
+  { id: "Ricardo", label: "Ricardo (Amazon, masc.)", gender: "M" },
+  { id: "browser", label: "Voz do navegador", gender: "F" }
 ];
-const SE_PTBR_CHAIN = ["pt-BR-Wavenet-A", "pt-BR-Standard-A", "Vitoria", "Ricardo"];
+const SE_PTBR_CHAIN = ["pt-BR-Wavenet-A", "pt-BR-Standard-A", "Vitoria", "pt-BR-Wavenet-C", "pt-BR-Standard-C", "Ricardo"];
 const STREAM_ELEMENTS_URL = "https://api.streamelements.com/kappa/v2/speech";
 const MAX_CHUNK = 900;
 
@@ -265,7 +267,13 @@ async function speak(text) {
     if (voiceId === "browser") {
       await speakWithBrowser(chunk, session);
     } else {
-      const chain = [voiceId, ...SE_PTBR_CHAIN.filter(v => v !== voiceId)];
+      const selected = TTS_VOICES.find(v => v.id === voiceId) || TTS_VOICES[0];
+      const sameGender = SE_PTBR_CHAIN.filter(id => {
+        const info = TTS_VOICES.find(v => v.id === id);
+        return id !== voiceId && info && info.gender === selected.gender;
+      });
+      const others = SE_PTBR_CHAIN.filter(id => !sameGender.includes(id) && id !== voiceId);
+      const chain = [voiceId, ...sameGender, ...others];
       let spoken = false;
       for (const candidate of chain) {
         if (session !== speakSession) return;
@@ -274,7 +282,7 @@ async function speak(text) {
           break;
         }
       }
-      if (!spoken) await speakWithBrowser(chunk, session, true);
+      if (!spoken) await speakWithBrowser(chunk, session, true, selected.gender);
     }
     if (session !== speakSession) return;
   }
@@ -312,7 +320,7 @@ function speakWithStreamElements(text, voiceId, session) {
   });
 }
 
-function speakWithBrowser(text, session, isFallback = false) {
+function speakWithBrowser(text, session, isFallback = false, gender = "F") {
   return new Promise((resolve) => {
     if (!("speechSynthesis" in window)) return resolve(true);
     window.speechSynthesis.cancel();
@@ -323,9 +331,9 @@ function speakWithBrowser(text, session, isFallback = false) {
     const voices = window.speechSynthesis.getVoices();
     const ptVoices = voices.filter(v => v.lang && v.lang.toLowerCase().replace("_", "-").startsWith("pt-br")
       || (v.lang && v.lang.toLowerCase().startsWith("pt")));
-    const natural = ptVoices.find(v => /natural|neural/i.test(v.name))
-      || ptVoices.find(v => /google/i.test(v.name))
-      || ptVoices.find(v => /francisca|antonio|luciana|maria/i.test(v.name))
+    const matchGender = gender === "M" ? /ricardo|antonio|thiago|homer|daniel|felipe|male|masculin/i : /natural|neural|francisca|luciana|maria|camila|female|feminin/i;
+    const natural = ptVoices.find(v => matchGender.test(v.name))
+      || ptVoices.find(v => /natural|neural|google/i.test(v.name))
       || ptVoices[0];
     if (natural) utterance.voice = natural;
     let settled = false;
