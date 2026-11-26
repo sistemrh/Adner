@@ -3,6 +3,15 @@ const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "openai/gpt-oss-120b";
 const WAKE_WORD = "edi";
 
+const TTS_VOICES = [
+  { id: "Camila", label: "Camila (Amazon, neural)" },
+  { id: "Vitoria", label: "Vitória (Amazon, neural)" },
+  { id: "Ricardo", label: "Ricardo (Amazon, neural)" },
+  { id: "browser", label: "Voz do navegador" }
+];
+const STREAM_ELEMENTS_URL = "https://api.streamelements.com/kappa/v2/speech";
+const MAX_CHUNK = 450;
+
 const SYSTEM_PROMPT = [
   "Você é Edi, uma assistente pessoal de voz com personalidade inspirada no Jarvis dos filmes do Homem de Ferro.",
   "Você é extremamente competente, leal, elegante e tem um humor sutil e britânico.",
@@ -19,6 +28,7 @@ const continuousToggle = document.getElementById("continuous");
 const stopSpeechBtn = document.getElementById("stop-speech");
 const textForm = document.getElementById("text-form");
 const textInput = document.getElementById("text-input");
+const voiceSelect = document.getElementById("voice-select");
 
 const history = [
   { role: "system", content: SYSTEM_PROMPT }
@@ -29,6 +39,21 @@ let recognition = null;
 let wakeMode = false;
 let manualStop = false;
 let busy = false;
+let audioPlayer = new Audio();
+let speakSession = 0;
+
+TTS_VOICES.forEach(v => {
+  const option = document.createElement("option");
+  option.value = v.id;
+  option.textContent = v.label;
+  voiceSelect.appendChild(option);
+});
+voiceSelect.value = localStorage.getItem("edi-voice") || "Camila";
+if (!voiceSelect.value) voiceSelect.value = "Camila";
+voiceSelect.addEventListener("change", () => {
+  localStorage.setItem("edi-voice", voiceSelect.value);
+  stopSpeaking();
+});
 
 if (SpeechRecognition) {
   recognition = new SpeechRecognition();
@@ -105,13 +130,7 @@ continuousToggle.addEventListener("change", () => {
   }
 });
 
-stopSpeechBtn.addEventListener("click", () => {
-  window.speechSynthesis.cancel();
-  if (orb.classList.contains("speaking")) {
-    orb.classList.remove("speaking");
-    setStatus("Pronta quando você precisar.", "idle");
-  }
-});
+stopSpeechBtn.addEventListener("click", stopSpeaking);
 
 textForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -120,6 +139,17 @@ textForm.addEventListener("submit", (event) => {
   textInput.value = "";
   handleUtterance(text, false);
 });
+
+function stopSpeaking() {
+  speakSession++;
+  window.speechSynthesis.cancel();
+  if (audioPlayer) {
+    audioPlayer.pause();
+    audioPlayer.src = "";
+  }
+  orb.classList.remove("speaking");
+  if (!busy) setStatus("Pronta quando você precisar.", "idle");
+}
 
 async function handleUtterance(text, fromVoice = true) {
   if (busy) return;
@@ -136,7 +166,7 @@ async function handleUtterance(text, fromVoice = true) {
     }
     command = text.slice(index + WAKE_WORD.length).replace(/^[\s,.!?]+/, "");
     if (!command) {
-      speak("Sim? Estou ouvindo.");
+      await speak("Sim? Estou ouvindo.");
       busy = false;
       return;
     }
@@ -154,13 +184,13 @@ async function handleUtterance(text, fromVoice = true) {
     const reply = await askGroq();
     history.push({ role: "assistant", content: reply });
     addMessage("edi", reply);
-    speak(reply);
+    await speak(reply);
   } catch (error) {
     history.pop();
     const message = error && error.message ? error.message : "Falha de conexão.";
     addMessage("error", message);
     setStatus("Encontrei um problema.", "idle");
-    speak("Desculpe, encontrei um problema: " + message);
+    await speak("Desculpe, encontrei um problema.");
   } finally {
     busy = false;
     orb.classList.remove("thinking", "speaking");
@@ -202,27 +232,92 @@ async function askGroq() {
   return content && content.content ? content.content.trim() : "Não consegui formular uma resposta.";
 }
 
-function speak(text) {
-  if (!("speechSynthesis" in window)) return;
-  window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = "pt-BR";
-  utterance.rate = 1.05;
-  utterance.pitch = 1;
-  const voices = window.speechSynthesis.getVoices();
-  const ptVoice = voices.find(v => v.lang && v.lang.toLowerCase().startsWith("pt-br"))
-    || voices.find(v => v.lang && v.lang.toLowerCase().startsWith("pt"));
-  if (ptVoice) utterance.voice = ptVoice;
-  utterance.onstart = () => {
-    orb.classList.remove("thinking");
-    orb.classList.add("speaking");
-    setStatus("Edi está falando…", "speaking");
-  };
-  utterance.onend = () => {
+function splitIntoChunks(text) {
+  const clean = text.replace(/[*_`#>]/g, "").trim();
+  if (clean.length <= MAX_CHUNK) return [clean];
+  const sentences = clean.split(/(?<=[.!?…])\s+/);
+  const chunks = [];
+  let current = "";
+  for (const sentence of sentences) {
+    if ((current + " " + sentence).trim().length > MAX_CHUNK && current) {
+      chunks.push(current.trim());
+      current = sentence;
+    } else {
+      current = (current + " " + sentence).trim();
+    }
+  }
+  if (current.trim()) chunks.push(current.trim());
+  return chunks;
+}
+
+async function speak(text) {
+  const session = ++speakSession;
+  const chunks = splitIntoChunks(text);
+  orb.classList.remove("thinking");
+  orb.classList.add("speaking");
+  setStatus("Edi está falando…", "speaking");
+
+  const voiceId = voiceSelect.value;
+  for (const chunk of chunks) {
+    if (session !== speakSession) return;
+    if (voiceId === "browser") {
+      await speakWithBrowser(chunk, session);
+    } else {
+      const ok = await speakWithStreamElements(chunk, voiceId, session);
+      if (!ok) await speakWithBrowser(chunk, session, true);
+    }
+    if (session !== speakSession) return;
+  }
+
+  if (session === speakSession) {
     orb.classList.remove("speaking");
     setStatus("Pronta quando você precisar.", "idle");
-  };
-  window.speechSynthesis.speak(utterance);
+  }
+}
+
+function speakWithStreamElements(text, voiceId, session) {
+  return new Promise((resolve) => {
+    const url = `${STREAM_ELEMENTS_URL}?voice=${encodeURIComponent(voiceId)}&text=${encodeURIComponent(text)}`;
+    const player = new Audio(url);
+    audioPlayer = player;
+    let settled = false;
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      resolve(ok);
+    };
+    player.onended = () => finish(true);
+    player.onerror = () => finish(false);
+    player.play().catch(() => finish(false));
+  });
+}
+
+function speakWithBrowser(text, session, isFallback = false) {
+  return new Promise((resolve) => {
+    if (!("speechSynthesis" in window)) return resolve(true);
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "pt-BR";
+    utterance.rate = isFallback ? 1.05 : 1.02;
+    utterance.pitch = 1;
+    const voices = window.speechSynthesis.getVoices();
+    const ptVoices = voices.filter(v => v.lang && v.lang.toLowerCase().replace("_", "-").startsWith("pt-br")
+      || (v.lang && v.lang.toLowerCase().startsWith("pt")));
+    const natural = ptVoices.find(v => /natural|neural/i.test(v.name))
+      || ptVoices.find(v => /google/i.test(v.name))
+      || ptVoices.find(v => /francisca|antonio|luciana|maria/i.test(v.name))
+      || ptVoices[0];
+    if (natural) utterance.voice = natural;
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve(true);
+    };
+    utterance.onend = finish;
+    utterance.onerror = finish;
+    window.speechSynthesis.speak(utterance);
+  });
 }
 
 function setStatus(text, state) {

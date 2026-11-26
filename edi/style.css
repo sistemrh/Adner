@@ -164,6 +164,19 @@ h1 {
 .toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 .toggle input { accent-color: var(--cyan); width: 16px; height: 16px; }
 
+#voice-select {
+  background: rgba(0, 20, 35, 0.6);
+  border: 1px solid rgba(0, 229, 255, 0.25);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  outline: none;
+}
+#voice-select:focus { border-color: var(--cyan); }
+#voice-select option { background: #0a1220; color: var(--text); }
+
 .ghost-btn {
   background: transparent;
   border: 1px solid rgba(0, 229, 255, 0.3);
