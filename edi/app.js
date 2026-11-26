@@ -544,29 +544,44 @@ async function speakWithSpeechify(text, session, voiceId) {
 }
 
 async function discoverSpeechifyVoice() {
+  const variants = [
+    `?type=shared&locale=pt-BR&model=${SPEECHIFY_MODEL}&limit=200`,
+    `?type=shared&locale=pt&model=${SPEECHIFY_MODEL}&limit=200`,
+    `?type=shared&model=${SPEECHIFY_MODEL}&limit=200`,
+    `?type=shared&limit=200`
+  ];
   const collected = [];
-  let cursor = null;
-  try {
-    for (let page = 0; page < 4; page++) {
-      const params = new URLSearchParams({ type: "shared", locale: "pt-BR", model: SPEECHIFY_MODEL, limit: "200" });
-      if (cursor) params.set("cursor", cursor);
-      const response = await fetch(SPEECHIFY_VOICES_URL + "?" + params, {
+  let blocked = false;
+  for (const qs of variants) {
+    try {
+      const response = await fetch(SPEECHIFY_VOICES_URL + qs, {
         headers: { "Authorization": "Bearer " + SPEECHIFY_API_KEY }
       });
-      if (!response.ok) return finalizeSpeechifyVoices();
+      if (!response.ok) {
+        addMessage("info", `Speechify /voices ${qs.slice(1, 40)}… → HTTP ${response.status}`);
+        continue;
+      }
       const data = await response.json();
-      const items = Array.isArray(data) ? data : (data.voices || data.items || []);
+      const items = Array.isArray(data) ? data : (data.voices || data.items || data.data || []);
+      addMessage("info", `Speechify /voices ${qs.slice(1, 40)}… → ${items.length} vozes retornadas`);
       items.forEach(v => {
-        const genderRaw = (v.gender || (v.labels && v.labels.gender) || "").toString().toLowerCase();
-        const gender = genderRaw.startsWith("f") ? "F" : (genderRaw.startsWith("m") ? "M" : "M");
-        collected.push({ id: v.id || v.voice_id, name: v.display_name || v.name || v.id, gender: gender });
+        const localeRaw = String(v.locale || v.language || (v.labels && v.labels.locale) || "").toLowerCase();
+        if (qs.includes("locale=") || localeRaw.includes("pt-br") || localeRaw === "pt" || localeRaw.startsWith("pt")) {
+          const genderRaw = (v.gender || (v.labels && v.labels.gender) || "").toString().toLowerCase();
+          const gender = genderRaw.startsWith("f") ? "F" : "M";
+          collected.push({ id: v.id || v.voice_id, name: v.display_name || v.name || v.id, gender: gender });
+        }
       });
-      if (data && data.has_more && data.next_cursor) {
-        cursor = data.next_cursor;
-        await sleep(300);
-      } else break;
+      if (collected.length) break;
+    } catch (e) {
+      blocked = true;
+      break;
     }
-  } catch (e) { /* CORS or offline; keep fallback */ }
+  }
+  if (blocked) {
+    addMessage("info", "Speechify: o navegador bloqueou a chamada à API (CORS). A síntese também falhará — usando voz reserva.");
+    return finalizeSpeechifyVoices();
+  }
   return finalizeSpeechifyVoices(collected);
 }
 
@@ -624,7 +639,7 @@ function setStatus(text, state) {
 function addMessage(kind, text) {
   const div = document.createElement("div");
   div.className = "msg " + kind;
-  if (kind !== "error") {
+  if (kind !== "error" && kind !== "info") {
     const who = document.createElement("span");
     who.className = "who";
     who.textContent = kind === "user" ? "Você" : "Edi";
