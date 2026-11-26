@@ -47,10 +47,31 @@ const SUPABASE_URL = "https://sqbzrwjctudhktfgdnkn.supabase.co";
 const SUPABASE_KEY = "sb_publishable_TOLM_QG6OEuogwUG5D6PKw_8dm-SJ6s";
 const MEMORY_TABLE = "memories";
 const MEMORY_KEY = "sil-memories";
+const LAST_CHAT_KEY = "sil-last-chat";
 
 let memories = [];
 try { memories = JSON.parse(localStorage.getItem(MEMORY_KEY)) || []; } catch (e) { memories = []; }
 let memoryOnline = false;
+let lastChatNote = "";
+
+function describeLastChat(now) {
+  let last = null;
+  try {
+    const raw = localStorage.getItem(LAST_CHAT_KEY);
+    if (raw) last = new Date(raw);
+  } catch (e) { last = null; }
+  const day = d => d.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
+  const time = d => d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+  if (!last || isNaN(last)) {
+    return "Não há registro de conversas anteriores com ele. Cumprimente-o naturalmente conforme o horário (bom dia, boa tarde ou boa noite).";
+  }
+  if (day(last) === day(now)) {
+    return `Você já conversou com ele hoje; a última mensagem dele foi às ${time(last)}. Não é a primeira conversa do dia, então não cumprimente de novo.`;
+  }
+  const yesterday = new Date(now.getTime() - 86400000);
+  const quando = day(last) === day(yesterday) ? `ontem às ${time(last)}` : `em ${day(last)} às ${time(last)}`;
+  return `Esta é a primeira conversa de hoje; a última foi ${quando}. Cumprimente-o naturalmente conforme o horário (bom dia, boa tarde ou boa noite).`;
+}
 
 function saveMemories() {
   localStorage.setItem(MEMORY_KEY, JSON.stringify(memories));
@@ -433,6 +454,9 @@ async function handleUtterance(text, fromVoice = true, confidence = 0, alternati
   orb.classList.remove("listening");
   orb.classList.add("thinking");
 
+  lastChatNote = describeLastChat(new Date());
+  try { localStorage.setItem(LAST_CHAT_KEY, new Date().toISOString()); } catch (e) { /* private mode */ }
+
   history.push({ role: "user", content: command });
   while (history.length > 21) history.splice(1, 2);
 
@@ -471,6 +495,7 @@ function injectDateTime() {
     timeZone: "America/Sao_Paulo"
   });
   let context = SYSTEM_PROMPT + `\n\nData e hora atuais: ${formatted} (horário de Brasília).`;
+  if (lastChatNote) context += "\n\n" + lastChatNote;
   if (memories.length) {
     context += "\n\nMemórias de longo prazo sobre Claudio:\n" + memories.map(m => {
       const quando = m.em ? new Date(m.em).toLocaleDateString("pt-BR") : "";
