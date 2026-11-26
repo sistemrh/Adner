@@ -40,6 +40,7 @@ const SYSTEM_PROMPT = [
   "Quando Claudio pedir para esquecer ou apagar algo, use a ferramenta forget e confirme.",
   "Para perguntas sobre o tempo, use a ferramenta get_weather. Se não souberem a cidade, pergunte apenas qual cidade.",
   "Quando Claudio pedir para ver ou ler as mensagens do WhatsApp, use a ferramenta get_messages e diga quem mandou e o que disseram.",
+  "Para fazer uma ligação, use a ferramenta dial_phone com o número; se o número não estiver na memória, pergunte antes e sugira tomar nota para as próximas vezes.",
   "Para notícias, use a ferramenta get_news e faça um resumo falado das principais: agrupe os assuntos mais relevantes em poucas frases naturais, sem listar uma por uma, e cite a fonte quando fizer sentido.",
   "Você sabe a data e a hora atuais porque elas são informadas neste prompt. Use-as sem hesitar."
 ].join(" ");
@@ -154,6 +155,23 @@ async function forgetFacts(terms) {
   return before - memories.length;
 }
 
+async function dialPhone(numero) {
+  const digits = (numero || "").replace(/[^0-9+]/g, "");
+  if (digits.replace(/[^0-9]/g, "").length < 8) {
+    return { ok: false, erro: "Número inválido ou incompleto." };
+  }
+  if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NotificationListener) {
+    try {
+      await window.Capacitor.Plugins.NotificationListener.dial({ numero: digits });
+      return { ok: true, abriu: "discador com o número pronto; o Claudio confirma a chamada com um toque" };
+    } catch (e) {
+      return { ok: false, erro: "Não consegui abrir o discador." };
+    }
+  }
+  window.location.href = "tel:" + digits;
+  return { ok: true, abriu: "discador com o número pronto" };
+}
+
 async function getMessages() {
   try {
     const response = await supabaseRequest(`${MESSAGES_TABLE}?select=id,remetente,texto,recebida&lida=eq.false&order=recebida.desc&limit=15`);
@@ -217,6 +235,20 @@ const TOOLS = [
       name: "get_messages",
       description: "Lê as mensagens novas do WhatsApp que chegaram no celular e as marca como lidas",
       parameters: { type: "object", properties: {} }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "dial_phone",
+      description: "Abre o discador do celular com o número pronto para ligar; o Claudio confirma a chamada com um toque",
+      parameters: {
+        type: "object",
+        properties: {
+          numero: { type: "string", description: "Número de telefone com DDD, só dígitos, ex.: 11987654321" }
+        },
+        required: ["numero"]
+      }
     }
   },
   {
@@ -655,6 +687,8 @@ async function askGroq() {
             result = JSON.stringify(await getNews(args.assunto || ""));
           } else if (call.function.name === "get_messages") {
             result = JSON.stringify(await getMessages());
+          } else if (call.function.name === "dial_phone") {
+            result = JSON.stringify(await dialPhone(args.numero || ""));
           } else if (call.function.name === "remember") {
             const fato = (args.fato || "").trim();
             if (fato) {

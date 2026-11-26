@@ -1,6 +1,7 @@
 package com.sistemrh.sil;
 
 import android.content.Intent;
+import android.net.Uri;
 import android.provider.Settings;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -23,6 +24,19 @@ public class NotificationListenerPlugin extends Plugin {
     JSObject ret = new JSObject();
     ret.put("granted", flat != null && flat.contains(getContext().getPackageName()));
     call.resolve(ret);
+  }
+
+  @PluginMethod
+  public void dial(PluginCall call) {
+    String numero = call.getString("numero", "");
+    if (numero == null || numero.replace("[^0-9+]", "").length() < 8) {
+      call.reject("Número inválido");
+      return;
+    }
+    Intent intent = new Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + numero));
+    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+    getContext().startActivity(intent);
+    call.resolve();
   }
 
   @PluginMethod
