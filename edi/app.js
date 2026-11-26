@@ -22,8 +22,9 @@ const SPEECHIFY_API_KEY = "sk_aws5h0bt4k98pf3kz5nfcd1w00w2hqsash8wtxrk5sw";
 const SPEECHIFY_URL = "https://api.speechify.ai/v1/audio/stream";
 const SPEECHIFY_VOICES_URL = "https://api.speechify.ai/v1/voices";
 const SPEECHIFY_MODEL = "simba-multilingual";
-const SPEECHIFY_DEFAULT_VOICE = "geffen_32";
-const SPEECHIFY_OPTION = { id: "speechify-male", label: "Speechify — masculina natural", gender: "M" };
+const SPEECHIFY_PREFIX = "speechify:";
+const SPEECHIFY_FALLBACK_VOICE = "geffen_32";
+const SPEECHIFY_GENDER = {};
 const MAX_CHUNK = 900;
 
 const SYSTEM_PROMPT = [
@@ -58,7 +59,8 @@ let busy = false;
 let audioPlayer = new Audio();
 let speakSession = 0;
 let workingVoices = [];
-let speechifyVoiceId = localStorage.getItem("edi-speechify-voice") || SPEECHIFY_DEFAULT_VOICE;
+let speechifyVoices = [{ id: SPEECHIFY_FALLBACK_VOICE, name: "voz padrão", gender: "M" }];
+SPEECHIFY_GENDER[SPEECHIFY_FALLBACK_VOICE] = "M";
 
 function getElevenKey() {
   return (localStorage.getItem("edi-elevenlabs-key") || "").trim();
@@ -69,7 +71,13 @@ function populateVoiceSelect(voices, preferredId) {
   voiceSelect.innerHTML = "";
   const options = [];
   if (getElevenKey()) options.push(ELEVEN_OPTION);
-  options.push(SPEECHIFY_OPTION);
+  speechifyVoices.forEach(v => {
+    options.push({
+      id: SPEECHIFY_PREFIX + v.id,
+      label: "Speechify: " + v.name + (v.gender === "M" ? " (masc.)" : " (fem.)"),
+      gender: v.gender
+    });
+  });
   options.push(...voices);
   const browserOption = document.createElement("option");
   browserOption.value = "browser";
@@ -93,7 +101,10 @@ function populateVoiceSelect(voices, preferredId) {
   if (previous && validIds.includes(previous)) voiceSelect.value = previous;
   else if (savedVoice && validIds.includes(savedVoice)) voiceSelect.value = savedVoice;
   else if (getElevenKey()) voiceSelect.value = ELEVEN_OPTION.id;
-  else voiceSelect.value = SPEECHIFY_OPTION.id;
+  else {
+    const maleSpeechify = options.find(v => v.id.startsWith(SPEECHIFY_PREFIX) && v.gender === "M");
+    voiceSelect.value = maleSpeechify ? maleSpeechify.id : options[0].id;
+  }
 }
 
 populateVoiceSelect(VOICE_CANDIDATES, null);
@@ -383,10 +394,11 @@ async function speak(text) {
       if (!ok && session === speakSession) {
         await speakWithBrowser(chunk, session, true, ELEVEN_OPTION.gender);
       }
-    } else if (voiceId === SPEECHIFY_OPTION.id) {
-      const ok = await speakWithSpeechify(chunk, session);
+    } else if (voiceId.startsWith(SPEECHIFY_PREFIX)) {
+      const sfxVoice = voiceId.slice(SPEECHIFY_PREFIX.length);
+      const ok = await speakWithSpeechify(chunk, session, sfxVoice);
       if (!ok && session === speakSession) {
-        await speakWithBrowser(chunk, session, true, SPEECHIFY_OPTION.gender);
+        await speakWithBrowser(chunk, session, true, SPEECHIFY_GENDER[sfxVoice] || "M");
       }
     } else {
       const selected = VOICE_CANDIDATES.find(v => v.id === voiceId) || VOICE_CANDIDATES[0];
@@ -483,7 +495,7 @@ async function speakWithElevenLabs(text, session) {
   }
 }
 
-async function speakWithSpeechify(text, session) {
+async function speakWithSpeechify(text, session, voiceId) {
   try {
     const response = await fetch(SPEECHIFY_URL, {
       method: "POST",
@@ -494,7 +506,7 @@ async function speakWithSpeechify(text, session) {
       },
       body: JSON.stringify({
         input: text,
-        voice_id: speechifyVoiceId,
+        voice_id: voiceId,
         model: SPEECHIFY_MODEL
       })
     });
@@ -532,23 +544,44 @@ async function speakWithSpeechify(text, session) {
 }
 
 async function discoverSpeechifyVoice() {
+  const collected = [];
+  let cursor = null;
   try {
-    const response = await fetch(SPEECHIFY_VOICES_URL + "?type=shared&locale=pt-BR&model=" + SPEECHIFY_MODEL, {
-      headers: { "Authorization": "Bearer " + SPEECHIFY_API_KEY }
-    });
-    if (!response.ok) return;
-    const data = await response.json();
-    const items = Array.isArray(data) ? data : (data.voices || data.items || []);
-    const male = items.find(v => (v.gender || "").toLowerCase().startsWith("m"))
-      || items.find(v => typeof v.labels !== "undefined" && String(v.labels.gender || "").toLowerCase().startsWith("m"))
-      || items[0];
-    if (male && male.id) {
-      speechifyVoiceId = male.id;
-      localStorage.setItem("edi-speechify-voice", male.id);
-      const option = voiceSelect.querySelector("option[value='speechify-male']");
-      if (option) option.textContent = "Speechify: " + (male.name || male.id) + " (masc. natural) ✓";
+    for (let page = 0; page < 4; page++) {
+      const params = new URLSearchParams({ type: "shared", locale: "pt-BR", model: SPEECHIFY_MODEL, limit: "200" });
+      if (cursor) params.set("cursor", cursor);
+      const response = await fetch(SPEECHIFY_VOICES_URL + "?" + params, {
+        headers: { "Authorization": "Bearer " + SPEECHIFY_API_KEY }
+      });
+      if (!response.ok) return finalizeSpeechifyVoices();
+      const data = await response.json();
+      const items = Array.isArray(data) ? data : (data.voices || data.items || []);
+      items.forEach(v => {
+        const genderRaw = (v.gender || (v.labels && v.labels.gender) || "").toString().toLowerCase();
+        const gender = genderRaw.startsWith("f") ? "F" : (genderRaw.startsWith("m") ? "M" : "M");
+        collected.push({ id: v.id || v.voice_id, name: v.display_name || v.name || v.id, gender: gender });
+      });
+      if (data && data.has_more && data.next_cursor) {
+        cursor = data.next_cursor;
+        await sleep(300);
+      } else break;
     }
-  } catch (e) { /* CORS or offline; keep default voice */ }
+  } catch (e) { /* CORS or offline; keep fallback */ }
+  return finalizeSpeechifyVoices(collected);
+}
+
+function finalizeSpeechifyVoices(collected) {
+  if (collected && collected.length) {
+    const seen = new Set();
+    speechifyVoices = collected.filter(v => {
+      if (!v.id || seen.has(v.id)) return false;
+      seen.add(v.id);
+      SPEECHIFY_GENDER[v.id] = v.gender;
+      return true;
+    });
+    speechifyVoices.sort((a, b) => (a.gender === b.gender ? 0 : a.gender === "M" ? -1 : 1));
+  }
+  populateVoiceSelect(workingVoices, null);
 }
 
 discoverSpeechifyVoice();
