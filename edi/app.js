@@ -18,6 +18,12 @@ const ELEVEN_URL = "https://api.elevenlabs.io/v1/text-to-speech/";
 const ELEVEN_VOICE_ID = "ErXwobaYiN019PkySvjV";
 const ELEVEN_MODEL = "eleven_multilingual_v2";
 const ELEVEN_OPTION = { id: "eleven-antoni", label: "Antoni — masculina natural (ElevenLabs)", gender: "M" };
+const SPEECHIFY_API_KEY = "sk_aws5h0bt4k98pf3kz5nfcd1w00w2hqsash8wtxrk5sw";
+const SPEECHIFY_URL = "https://api.speechify.ai/v1/audio/stream";
+const SPEECHIFY_VOICES_URL = "https://api.speechify.ai/v1/voices";
+const SPEECHIFY_MODEL = "simba-multilingual";
+const SPEECHIFY_DEFAULT_VOICE = "geffen_32";
+const SPEECHIFY_OPTION = { id: "speechify-male", label: "Speechify — masculina natural", gender: "M" };
 const MAX_CHUNK = 900;
 
 const SYSTEM_PROMPT = [
@@ -52,6 +58,7 @@ let busy = false;
 let audioPlayer = new Audio();
 let speakSession = 0;
 let workingVoices = [];
+let speechifyVoiceId = localStorage.getItem("edi-speechify-voice") || SPEECHIFY_DEFAULT_VOICE;
 
 function getElevenKey() {
   return (localStorage.getItem("edi-elevenlabs-key") || "").trim();
@@ -62,6 +69,7 @@ function populateVoiceSelect(voices, preferredId) {
   voiceSelect.innerHTML = "";
   const options = [];
   if (getElevenKey()) options.push(ELEVEN_OPTION);
+  options.push(SPEECHIFY_OPTION);
   options.push(...voices);
   const browserOption = document.createElement("option");
   browserOption.value = "browser";
@@ -85,10 +93,7 @@ function populateVoiceSelect(voices, preferredId) {
   if (previous && validIds.includes(previous)) voiceSelect.value = previous;
   else if (savedVoice && validIds.includes(savedVoice)) voiceSelect.value = savedVoice;
   else if (getElevenKey()) voiceSelect.value = ELEVEN_OPTION.id;
-  else {
-    const female = voices.find(v => v.gender === "F");
-    voiceSelect.value = (female || voices[0]).id;
-  }
+  else voiceSelect.value = SPEECHIFY_OPTION.id;
 }
 
 populateVoiceSelect(VOICE_CANDIDATES, null);
@@ -378,6 +383,11 @@ async function speak(text) {
       if (!ok && session === speakSession) {
         await speakWithBrowser(chunk, session, true, ELEVEN_OPTION.gender);
       }
+    } else if (voiceId === SPEECHIFY_OPTION.id) {
+      const ok = await speakWithSpeechify(chunk, session);
+      if (!ok && session === speakSession) {
+        await speakWithBrowser(chunk, session, true, SPEECHIFY_OPTION.gender);
+      }
     } else {
       const selected = VOICE_CANDIDATES.find(v => v.id === voiceId) || VOICE_CANDIDATES[0];
       const chain = [voiceId];
@@ -472,6 +482,76 @@ async function speakWithElevenLabs(text, session) {
     return false;
   }
 }
+
+async function speakWithSpeechify(text, session) {
+  try {
+    const response = await fetch(SPEECHIFY_URL, {
+      method: "POST",
+      headers: {
+        "Authorization": "Bearer " + SPEECHIFY_API_KEY,
+        "Content-Type": "application/json",
+        "Accept": "audio/mpeg"
+      },
+      body: JSON.stringify({
+        input: text,
+        voice_id: speechifyVoiceId,
+        model: SPEECHIFY_MODEL
+      })
+    });
+    if (!response.ok) {
+      let detail = "";
+      try {
+        const data = await response.json();
+        if (data.message) detail = data.message;
+        else if (data.error) detail = data.error;
+      } catch (e) { /* binary or empty */ }
+      addMessage("error", "Speechify " + response.status + (detail ? ": " + detail : "") + " — usando voz reserva.");
+      return false;
+    }
+    const blob = await response.blob();
+    return await new Promise((resolve) => {
+      const player = new Audio(URL.createObjectURL(blob));
+      audioPlayer = player;
+      let settled = false;
+      const finish = (ok) => {
+        if (settled) return;
+        settled = true;
+        player.onended = null;
+        player.onerror = null;
+        resolve(ok);
+      };
+      player.onended = () => finish(true);
+      player.onerror = () => finish(false);
+      if (session !== speakSession) return resolve(false);
+      player.play().catch(() => finish(false));
+    });
+  } catch (e) {
+    addMessage("error", "Speechify inacessível pelo navegador (CORS/rede) — usando voz reserva.");
+    return false;
+  }
+}
+
+async function discoverSpeechifyVoice() {
+  try {
+    const response = await fetch(SPEECHIFY_VOICES_URL + "?type=shared&locale=pt-BR&model=" + SPEECHIFY_MODEL, {
+      headers: { "Authorization": "Bearer " + SPEECHIFY_API_KEY }
+    });
+    if (!response.ok) return;
+    const data = await response.json();
+    const items = Array.isArray(data) ? data : (data.voices || data.items || []);
+    const male = items.find(v => (v.gender || "").toLowerCase().startsWith("m"))
+      || items.find(v => typeof v.labels !== "undefined" && String(v.labels.gender || "").toLowerCase().startsWith("m"))
+      || items[0];
+    if (male && male.id) {
+      speechifyVoiceId = male.id;
+      localStorage.setItem("edi-speechify-voice", male.id);
+      const option = voiceSelect.querySelector("option[value='speechify-male']");
+      if (option) option.textContent = "Speechify: " + (male.name || male.id) + " (masc. natural) ✓";
+    }
+  } catch (e) { /* CORS or offline; keep default voice */ }
+}
+
+discoverSpeechifyVoice();
 
 function speakWithBrowser(text, session, isFallback = false, gender = "F") {
   return new Promise((resolve) => {
