@@ -1,7 +1,7 @@
 const GROQ_API_KEY = "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";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "openai/gpt-oss-120b";
-const APP_VERSION = "v54";
+const APP_VERSION = "v55";
 const WAKE_WORD = "tiz";
 const WAKE_VARIANTS = ["tiz", "tis", "dis", "tyz", "tizz", "chis", "tiss", "tys", "thys", "tz", "tiche", "tige", "tix", "teez", "tchi"];
 
@@ -49,6 +49,7 @@ const SYSTEM_PROMPT = [
   "Quando Claudio pedir para ver ou ler as mensagens do WhatsApp, use a ferramenta get_messages e diga quem mandou e o que disseram.",
   "Para fazer uma ligação, use a ferramenta dial_phone com o número; se o número não estiver na memória, pergunte antes e sugira tomar nota para as próximas vezes.",
   "Para notícias, use a ferramenta get_news e faça um resumo falado das principais: agrupe os assuntos mais relevantes em poucas frases naturais, sem listar uma por uma, e cite a fonte quando fizer sentido.",
+  "Para perguntas sobre fatos, pessoas, lugares, empresas ou assuntos atuais que você não sabe com certeza, use a ferramenta search_web para pesquisar na internet e responda com base no resultado, dizendo a fonte em poucas palavras. Se a busca não trouxer nada útil, diga que não encontrou, sem inventar.",
   "Você sabe a data e a hora atuais porque elas são informadas neste prompt. Use-as sem hesitar."
 ].join(" ");
 
@@ -233,6 +234,20 @@ const TOOLS = [
         properties: {
           assunto: { type: "string", description: "Assunto opcional para filtrar, ex.: economia, esportes, política, Brasil. Vazio para as manchetes gerais do dia." }
         }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "search_web",
+      description: "Pesquisa na internet fatos, pessoas, lugares, empresas e assuntos atuais que não constam na memória",
+      parameters: {
+        type: "object",
+        properties: {
+          consulta: { type: "string", description: "O que pesquisar, em português, ex.: quem é o prefeito de Recife" }
+        },
+        required: ["consulta"]
       }
     }
   },
@@ -849,6 +864,8 @@ async function askGroq() {
             result = JSON.stringify(await getWeather(args.cidade || ""));
           } else if (call.function.name === "get_news") {
             result = JSON.stringify(await getNews(args.assunto || ""));
+          } else if (call.function.name === "search_web") {
+            result = JSON.stringify(await searchWeb(args.consulta || ""));
           } else if (call.function.name === "get_messages") {
             result = JSON.stringify(await getMessages());
           } else if (call.function.name === "dial_phone") {
@@ -994,6 +1011,53 @@ async function getNews(assunto) {
       return { titulo: titulo, fonte: fonte, hora: formatHour(n.pubDate) };
     })
   };
+}
+
+function stripHtmlTags(html) {
+  const div = document.createElement("div");
+  div.innerHTML = html || "";
+  return (div.textContent || "").replace(/\s+/g, " ").trim();
+}
+
+async function fetchViaProxies(url, parseJson) {
+  const tentativas = [
+    url,
+    "https://api.allorigins.win/raw?url=" + encodeURIComponent(url),
+    "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(url)
+  ];
+  for (const alvo of tentativas) {
+    try {
+      const response = await fetch(alvo);
+      if (!response.ok) throw new Error(String(response.status));
+      return parseJson ? await response.json() : await response.text();
+    } catch (e) { /* tenta o próximo caminho */ }
+  }
+  throw new Error("todos os caminhos falharam");
+}
+
+async function searchWeb(consulta) {
+  if (!consulta) return { erro: "Busca vazia." };
+  const resultados = [];
+  try {
+    const wikiUrl = "https://pt.wikipedia.org/w/api.php?action=query&list=search&srsearch=" + encodeURIComponent(consulta) + "&format=json&origin=*&srlimit=4";
+    const data = await fetchViaProxies(wikiUrl, true);
+    for (const item of (data.query && data.query.search) || []) {
+      resultados.push({ titulo: item.title, resumo: stripHtmlTags(item.snippet), fonte: "Wikipédia" });
+    }
+  } catch (e) { /* segue para a web */ }
+  try {
+    const ddgUrl = "https://lite.duckduckgo.com/lite/?q=" + encodeURIComponent(consulta);
+    const html = await fetchViaProxies(ddgUrl, false);
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const links = Array.from(doc.querySelectorAll("a.result-link"));
+    const textos = Array.from(doc.querySelectorAll(".result-snippet"));
+    links.slice(0, 5).forEach((a, i) => {
+      const titulo = (a.textContent || "").trim();
+      if (titulo) resultados.push({ titulo: titulo, resumo: stripHtmlTags(textos[i] && textos[i].textContent), fonte: "web" });
+    });
+  } catch (e) { /* usa só o que temos */ }
+  if (!resultados.length) return { erro: "Nada encontrado na internet para essa busca." };
+  return { consulta: consulta, total: resultados.length, resultados: resultados.slice(0, 6) };
 }
 
 function cleanReply(text) {
