@@ -1,7 +1,7 @@
 const GROQ_API_KEY = "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";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "openai/gpt-oss-120b";
-const APP_VERSION = "v46";
+const APP_VERSION = "v47";
 const WAKE_WORD = "tiz";
 const WAKE_VARIANTS = ["tiz", "tis", "dis", "tyz", "tizz", "chis", "tiss", "tys", "thys"];
 
@@ -312,7 +312,7 @@ const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecogni
 const NativeSpeechRecognition = (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NotificationListener) || null;
 let recognition = null;
 let pendingInterim = "";
-let wakeMode = false;
+let wakeMode = true;
 let manualStop = false;
 let busy = false;
 let audioPlayer = new Audio();
@@ -494,7 +494,8 @@ async function appVoiceDiagnostics() {
 if (NativeSpeechRecognition) {
   recognition = createNativeRecognition();
   appVoiceDiagnostics();
-  setStatus("Toque no núcleo para falar.", "idle");
+  setStatus("Ouvindo… fale.", "listening");
+  startListening();
 } else if (SpeechRecognition) {
   recognition = buildBrowserRecognition();
 } else {
@@ -548,6 +549,7 @@ function createNativeRecognition() {
         const msg = (err && err.message) || String(err);
         encerrar();
         if (code === "not-allowed" || /permiss/i.test(msg)) {
+          wakeMode = false;
           let st = null;
           try { st = await plugin.micStatus(); } catch (e3) { st = { erro: String((e3 && e3.message) || e3) }; }
           encerrar();
@@ -1084,6 +1086,10 @@ function setStatus(text, state) {
 }
 
 function addMessage(kind, text) {
+  if (kind === "error") {
+    const log = document.getElementById("log");
+    if (log) log.style.display = "block";
+  }
   const div = document.createElement("div");
   div.className = "msg " + kind;
   if (kind === "user" || kind === "edi") {
