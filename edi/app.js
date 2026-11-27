@@ -1,7 +1,7 @@
 const GROQ_API_KEY = "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";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "openai/gpt-oss-120b";
-const APP_VERSION = "v53";
+const APP_VERSION = "v54";
 const WAKE_WORD = "tiz";
 const WAKE_VARIANTS = ["tiz", "tis", "dis", "tyz", "tizz", "chis", "tiss", "tys", "thys", "tz", "tiche", "tige", "tix", "teez", "tchi"];
 
@@ -35,6 +35,7 @@ const SYSTEM_PROMPT = [
   "Se a pergunta for sobre um dia específico, fale somente desse dia: nunca misture hoje com amanhã e nunca acrescente avisos sobre outros dias no final da resposta.",
   "Use linguagem falada, não escrita: nunca use expressões de texto formal como segue como de costume, não há necessidade de, deve ser observado, conforme solicitado. Fale como um mordomo falaria em voz alta, por exemplo, para perguntas sobre amanhã: Amanhã é sexta, senhor. Escola às 7 e trabalho depois. Sem lixo amanhã.",
   "Nunca use abreviações ou símbolos: escreva 7 horas (nunca 7h), milímetros (nunca mm), quilômetros por hora (nunca km/h), graus (nunca °C) e por cento (nunca %).",
+  "Sua resposta vai direto para o sintetizador de voz, sem passar por revisão: nunca escreva notas, comentários ou instruções para si mesma, nada entre parênteses, nada em inglês, e nunca repita a mesma frase duas vezes.",
   "Nunca se apresente, nunca diga que é uma assistente, assistente de voz ou IA, e não fale de si mesma desnecessariamente.",
   "Vá direto ao ponto, como um mordomo experiente que já conhece o patrão há anos.",
   "Você ouve por reconhecimento de voz, que às vezes erra: se o que ouviu parecer confuso, incompleto ou sem sentido, peça com educação para repetir em vez de inventar uma resposta.",
@@ -873,7 +874,7 @@ async function askGroq() {
       continue;
     }
 
-    return message.content ? message.content.trim() : "Não consegui formular uma resposta.";
+    return cleanReply(message.content ? message.content.trim() : "Não consegui formular uma resposta.");
   }
   return "Não consegui concluir a consulta.";
 }
@@ -993,6 +994,24 @@ async function getNews(assunto) {
       return { titulo: titulo, fonte: fonte, hora: formatHour(n.pubDate) };
     })
   };
+}
+
+function cleanReply(text) {
+  let t = text.replace(/\s*\((?:note|nota|observa[çc][ãa]o|obs\.?)[^)\n]*\)/gi, "");
+  t = t.replace(/^\s*(?:note|nota|observa[çc][ãa]o)\s*:.*$/gim, "");
+  t = t.replace(/([.!?…])[.!?…]+/g, "$1");
+  t = t.replace(/([.!?…])(?=[\p{L}])/gu, "$1 ");
+  const sentences = t.replace(/([.!?…])\s+/g, "$1\u0001").split("\u0001");
+  const seen = new Set();
+  const unique = [];
+  for (const s of sentences) {
+    const key = s.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+    if (!key) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(s.trim());
+  }
+  return unique.join(" ").trim();
 }
 
 function normalizeForSpeech(text) {
