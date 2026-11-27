@@ -242,6 +242,16 @@ h1 {
   color: var(--danger);
   font-size: 0.85rem;
 }
+.msg.hint {
+  align-self: center;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-family: monospace;
+  padding: 2px 8px;
+}
+
 .msg .who {
   display: block;
   font-size: 0.7rem;

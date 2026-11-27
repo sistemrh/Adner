@@ -346,7 +346,7 @@ function matchesWake(word) {
 function extractCommand(alternatives) {
   for (const text of alternatives) {
     const words = text.trim().split(/\s+/).filter(Boolean);
-    const limit = Math.min(words.length, 2);
+    const limit = Math.min(words.length, 3);
     for (let i = 0; i < limit; i++) {
       if (matchesWake(normalizeWord(words[i]))) {
         const lower = text.toLowerCase();
@@ -472,13 +472,16 @@ function createNativeRecognition() {
       rec._listening = true;
       if (rec.onstart) rec.onstart();
       try {
-        const result = await plugin.start({
-          language: rec.lang || "pt-BR",
-          maxResults: 3,
-          prompt: "",
-          partialResults: false,
-          popup: false
-        });
+        const result = await Promise.race([
+          plugin.start({
+            language: rec.lang || "pt-BR",
+            maxResults: 3,
+            prompt: "",
+            partialResults: false,
+            popup: false
+          }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 12000))
+        ]);
         rec._listening = false;
         const matches = (result && result.matches) || [];
         if (matches.length && rec.onresult) {
@@ -571,6 +574,8 @@ async function handleUtterance(text, fromVoice = true, confidence = 0, alternati
   if (fromVoice && wakeMode) {
     command = extractCommand(alternatives || [text]);
     if (command === null) {
+      const ouvido = text.length > 60 ? text.slice(0, 60) + "…" : text;
+      addMessage("hint", `Sem \"Sil\" no início — ignorado: “${ouvido}”`);
       busy = false;
       return;
     }
