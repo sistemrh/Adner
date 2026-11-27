@@ -17,7 +17,7 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import java.util.ArrayList;
 
-@CapacitorPlugin(name = "NotificationListener")
+@CapacitorPlugin(name = "NotificationListener", requestCodes = { 2002 })
 public class NotificationListenerPlugin extends Plugin {
   private static NotificationListenerPlugin instance;
   private PluginCall micCall;
@@ -65,7 +65,9 @@ public class NotificationListenerPlugin extends Plugin {
   @PluginMethod
   public void requestMic(final PluginCall call) {
     if (hasMic()) {
-      call.resolve();
+      JSObject ok = new JSObject();
+      ok.put("granted", true);
+      call.resolve(ok);
       return;
     }
     final Activity act = getActivity();

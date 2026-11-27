@@ -1,7 +1,7 @@
 const GROQ_API_KEY = "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";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "openai/gpt-oss-120b";
-const APP_VERSION = "v37";
+const APP_VERSION = "v38";
 const WAKE_WORD = "sil";
 const WAKE_VARIANTS = ["sil", "syl", "cil", "cyl", "sill", "sile", "syll", "cill", "siril", "cyril", "siri", "sila", "cecil", "sylla", "cila"];
 
@@ -481,10 +481,7 @@ async function appVoiceDiagnostics() {
   try {
     const st = await notif.micStatus();
     if (st && !st.granted) {
-      const req = await notif.requestMic();
-      if (req && req.granted === false) {
-        addMessage("error", "Microfone do app sem permissão. Autorize em Configurações → Aplicativos → Sil → Permissões → Microfone → Permitir e abra o app de novo.");
-      }
+      addMessage("hint", "Microfone ainda sem permissão — o Sil vai pedir quando você tocar no núcleo.");
     }
   } catch (e) {
     addMessage("error", "Voz no app: " + ((e && e.message) || e));
@@ -556,9 +553,17 @@ function createNativeRecognition() {
         const msg = (err && err.message) || String(err);
         if (code === "not-allowed" || /permiss/i.test(msg)) {
           let req = null;
-          try { req = await plugin.requestMic(); } catch (e2) { req = null; }
+          try {
+            req = await Promise.race([
+              plugin.requestMic(),
+              new Promise(resolve => setTimeout(() => resolve({ granted: false, timeout: true }), 60000))
+            ]);
+          } catch (e2) { req = null; }
           if (req && req.granted === false) {
             encerrar();
+            if (req.timeout) {
+              addMessage("hint", "Toque em Permitir na tela do Android para o Sil ouvir você.");
+            }
             if (rec.onerror) rec.onerror({ error: "not-allowed" });
             if (rec.onend) rec.onend();
             return;
