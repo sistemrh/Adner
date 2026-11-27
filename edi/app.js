@@ -1,7 +1,7 @@
 const GROQ_API_KEY = "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";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "openai/gpt-oss-120b";
-const APP_VERSION = "v43";
+const APP_VERSION = "v44";
 const WAKE_WORD = "sil";
 const WAKE_VARIANTS = ["sil", "syl", "cil", "cyl", "sill", "sile", "syll", "cill", "siril", "cyril", "siri", "sila", "cecil", "sylla", "cila"];
 
@@ -400,6 +400,64 @@ async function discoverSpeechifyVoice() {
 }
 discoverSpeechifyVoice();
 
+function handleVoiceResult(event) {
+  let finalText = "";
+  let interimText = "";
+  let confidence = 0;
+  const alternatives = [];
+  for (let i = event.resultIndex; i < event.results.length; i++) {
+    const result = event.results[i];
+    if (result.isFinal) {
+      finalText += result[0].transcript;
+      confidence = Math.max(confidence, result[0].confidence || 0);
+      for (let j = 0; j < result.length; j++) {
+        const alt = result[j].transcript.trim();
+        if (alt && !alternatives.includes(alt)) alternatives.push(alt);
+      }
+    } else {
+      interimText += result[0].transcript;
+    }
+  }
+  if (finalText.trim()) {
+    pendingInterim = "";
+    handleUtterance(finalText.trim(), true, confidence, alternatives);
+  } else if (interimText.trim()) {
+    pendingInterim = interimText.trim();
+    setStatus(`“${pendingInterim}”`, "listening");
+  }
+}
+
+function handleVoiceError(event) {
+  if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+    setStatus("Microfone bloqueado. Vá em Configurações → Aplicativos → Sil → Permissões → Microfone → Permitir.", "idle");
+    addMessage("error", "Permissão de microfone negada. Autorize em Configurações → Aplicativos → Sil → Permissões → Microfone → Permitir e abra o app de novo.");
+    continuousToggle.checked = false;
+    wakeMode = false;
+  } else if (event.error === "no-speech") {
+    setStatus("Não ouvi nada. Tente novamente.", "idle");
+  } else {
+    setStatus("Erro no microfone: " + event.error, "idle");
+  }
+  if (!busy) orb.classList.remove("listening");
+}
+
+function handleVoiceEnd() {
+  if (!busy) orb.classList.remove("listening");
+  const aproximado = pendingInterim;
+  pendingInterim = "";
+  if (!busy && wakeMode && !manualStop) {
+    if (aproximado) {
+      handleUtterance(aproximado, true, 0, [aproximado]);
+      return;
+    }
+    setTimeout(() => {
+      if (wakeMode && !busy) {
+        startListening();
+      }
+    }, 300);
+  }
+}
+
 function buildBrowserRecognition() {
   const recognition = new SpeechRecognition();
   recognition.lang = "pt-BR";
@@ -408,61 +466,9 @@ function buildBrowserRecognition() {
   recognition.continuous = false;
 
   recognition.onstart = () => setStatus("Ouvindo… fale agora", "listening");
-  recognition.onresult = (event) => {
-    let finalText = "";
-    let interimText = "";
-    let confidence = 0;
-    const alternatives = [];
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      const result = event.results[i];
-      if (result.isFinal) {
-        finalText += result[0].transcript;
-        confidence = Math.max(confidence, result[0].confidence || 0);
-        for (let j = 0; j < result.length; j++) {
-          const alt = result[j].transcript.trim();
-          if (alt && !alternatives.includes(alt)) alternatives.push(alt);
-        }
-      } else {
-        interimText += result[0].transcript;
-      }
-    }
-    if (finalText.trim()) {
-      pendingInterim = "";
-      handleUtterance(finalText.trim(), true, confidence, alternatives);
-    } else if (interimText.trim()) {
-      pendingInterim = interimText.trim();
-      setStatus(`“${pendingInterim}”`, "listening");
-    }
-  };
-  recognition.onerror = (event) => {
-    if (event.error === "not-allowed" || event.error === "service-not-allowed") {
-      setStatus("Microfone bloqueado. Vá em Configurações → Aplicativos → Sil → Permissões → Microfone → Permitir.", "idle");
-      addMessage("error", "Permissão de microfone negada. Autorize em Configurações → Aplicativos → Sil → Permissões → Microfone → Permitir e abra o app de novo.");
-      continuousToggle.checked = false;
-      wakeMode = false;
-    } else if (event.error === "no-speech") {
-      setStatus("Não ouvi nada. Tente novamente.", "idle");
-    } else {
-      setStatus("Erro no microfone: " + event.error, "idle");
-    }
-    if (!busy) orb.classList.remove("listening");
-  };
-  recognition.onend = () => {
-    if (!busy) orb.classList.remove("listening");
-    const aproximado = pendingInterim;
-    pendingInterim = "";
-    if (!busy && wakeMode && !manualStop) {
-      if (aproximado) {
-        handleUtterance(aproximado, true, 0, [aproximado]);
-        return;
-      }
-      setTimeout(() => {
-        if (wakeMode && !busy) {
-          startListening();
-        }
-      }, 300);
-    }
-  };
+  recognition.onresult = handleVoiceResult;
+  recognition.onerror = handleVoiceError;
+  recognition.onend = handleVoiceEnd;
   return recognition;
 }
 
@@ -599,6 +605,10 @@ function createNativeRecognition() {
     },
     abort() { rec.stop(); }
   };
+  rec.onstart = () => setStatus("Ouvindo… fale agora", "listening");
+  rec.onresult = handleVoiceResult;
+  rec.onerror = handleVoiceError;
+  rec.onend = handleVoiceEnd;
   return rec;
 }
 
