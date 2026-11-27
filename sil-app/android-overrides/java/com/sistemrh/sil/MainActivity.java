@@ -9,13 +9,4 @@ public class MainActivity extends BridgeActivity {
     registerPlugin(NotificationListenerPlugin.class);
     super.onCreate(savedInstanceState);
   }
-
-  @Override
-  public void onPause() {
-    super.onPause();
-    if (bridge != null && bridge.getWebView() != null) {
-      bridge.getWebView().onResume();
-      bridge.getWebView().resumeTimers();
-    }
-  }
 }

@@ -87,37 +87,6 @@ public class NotificationListenerPlugin extends Plugin {
   }
 
   @PluginMethod
-  public void startWakeService(PluginCall call) {
-    try {
-      android.content.Intent i = new android.content.Intent(getContext(), WakeWordService.class);
-      if (android.os.Build.VERSION.SDK_INT >= 26) {
-        getContext().startForegroundService(i);
-      } else {
-        getContext().startService(i);
-      }
-      JSObject ret = new JSObject();
-      ret.put("started", true);
-      call.resolve(ret);
-    } catch (Exception e) {
-      call.reject("Não consegui iniciar a escuta permanente: " + e.getMessage());
-    }
-  }
-
-  @PluginMethod
-  public void stopWakeService(PluginCall call) {
-    try {
-      getContext().stopService(new android.content.Intent(getContext(), WakeWordService.class));
-    } catch (Exception e) { }
-    call.resolve();
-  }
-
-  public static void emit(String event, JSObject data) {
-    if (instance != null) {
-      instance.notifyListeners(event, data);
-    }
-  }
-
-  @PluginMethod
   public void openAppSettings(PluginCall call) {
     Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
       Uri.fromParts("package", getContext().getPackageName(), null));

@@ -1,7 +1,7 @@
 const GROQ_API_KEY = "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";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "openai/gpt-oss-120b";
-const APP_VERSION = "v54";
+const APP_VERSION = "v57";
 const WAKE_WORD = "tiz";
 const WAKE_VARIANTS = ["tiz", "tis", "dis", "tyz", "tizz", "chis", "tiss", "tys", "thys", "tz", "tiche", "tige", "tix", "teez", "tchi"];
 
@@ -474,7 +474,6 @@ function buildBrowserRecognition() {
 }
 
 function startListening() {
-  if (servicoEscuta) return;
   if (recognition && recognition._listening) return;
   if (NativeSpeechRecognition) {
     recognition = createNativeRecognition();
@@ -497,36 +496,10 @@ async function appVoiceDiagnostics() {
   }
 }
 
-let servicoEscuta = false;
-
-async function ligarEscutaPermanente() {
-  const notif = window.Capacitor.Plugins.NotificationListener;
-  try {
-    try {
-      await notif.addListener("wakePartial", (d) => {
-        const t = (d && d.text) || "";
-        if (t) {
-          pendingInterim = t;
-          setStatus(`“${t}”`, "listening");
-        }
-      });
-    } catch (e) { /* sem parciais */ }
-    await notif.addListener("wakeResult", (d) => {
-      const t = (d && d.text) || "";
-      if (t && !busy) handleUtterance(t, true, 0, [t]);
-    });
-    const r = await notif.startWakeService();
-    servicoEscuta = !!(r && r.started);
-  } catch (e) {
-    addMessage("error", "Escuta permanente: " + ((e && e.message) || e));
-  }
-  if (!servicoEscuta) startListening();
-}
-
 if (NativeSpeechRecognition) {
   appVoiceDiagnostics();
   setStatus("Ouvindo… fale.", "listening");
-  ligarEscutaPermanente();
+  startListening();
 } else if (SpeechRecognition) {
   recognition = buildBrowserRecognition();
 } else {
@@ -646,13 +619,8 @@ function createNativeRecognition() {
 }
 
 orb.addEventListener("click", () => {
-  if (!recognition && !servicoEscuta) {
+  if (!recognition) {
     textInput.focus();
-    return;
-  }
-  if (servicoEscuta) {
-    escutaAtiva = !escutaAtiva;
-    setStatus(escutaAtiva ? "Escuta ativada." : "Escuta desligada. Diga Tiz para ativar.", "idle");
     return;
   }
   if (orb.classList.contains("listening")) {
