@@ -1,7 +1,7 @@
 const GROQ_API_KEY = "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";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "openai/gpt-oss-120b";
-const APP_VERSION = "v42";
+const APP_VERSION = "v43";
 const WAKE_WORD = "sil";
 const WAKE_VARIANTS = ["sil", "syl", "cil", "cyl", "sill", "sile", "syll", "cill", "siril", "cyril", "siri", "sila", "cecil", "sylla", "cila"];
 
@@ -467,10 +467,10 @@ function buildBrowserRecognition() {
 }
 
 function startListening() {
-  if (SpeechRecognition) {
-    recognition = buildBrowserRecognition();
-  } else if (NativeSpeechRecognition) {
+  if (NativeSpeechRecognition) {
     recognition = createNativeRecognition();
+  } else if (SpeechRecognition) {
+    recognition = buildBrowserRecognition();
   }
   if (!recognition) return;
   try { recognition.start(); } catch (e) { setStatus("Aguarde um instante e toque novamente.", "idle"); }
@@ -488,12 +488,12 @@ async function appVoiceDiagnostics() {
   }
 }
 
-if (SpeechRecognition) {
-  recognition = buildBrowserRecognition();
-} else if (NativeSpeechRecognition) {
+if (NativeSpeechRecognition) {
   recognition = createNativeRecognition();
   appVoiceDiagnostics();
   setStatus("Toque no núcleo para falar.", "idle");
+} else if (SpeechRecognition) {
+  recognition = buildBrowserRecognition();
 } else {
   setStatus("Seu navegador não suporta voz. Use o campo de texto abaixo.", "idle");
 }
