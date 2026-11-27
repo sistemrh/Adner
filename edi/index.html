@@ -4,13 +4,13 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Tiz</title>
-<link rel="stylesheet" href="style.css?v=45" />
+<link rel="stylesheet" href="style.css?v=46" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='40' fill='none' stroke='%2300e5ff' stroke-width='8'/%3E%3Ccircle cx='50' cy='50' r='15' fill='%2300e5ff'/%3E%3C/svg%3E" />
 </head>
 <body>
 <div class="hud">
   <header>
-    <h1>SIL</h1>
+    <h1>TIZ</h1>
   </header>
 
   <div class="orb-stage">
@@ -24,15 +24,7 @@
 
   <p id="status" class="status">Toque no núcleo para ativar</p>
 
-  <div class="controls">
-    <label class="toggle">
-      <input type="checkbox" id="continuous" />
-      <span>Escuta contínua (responde sempre)</span>
-    </label>
-    <button id="stop-speech" class="ghost-btn" title="Interromper fala">⏹ Silenciar</button>
-  </div>
-
-  <form id="text-form" class="text-form">
+  <form id="text-form" class="text-form hidden">
     <input id="text-input" type="text" placeholder="Digite sua mensagem…" autocomplete="off" />
     <button type="submit">Enviar</button>
   </form>
@@ -40,6 +32,6 @@
   <section id="log" class="log" aria-live="polite"></section>
 </div>
 
-<script src="app.js?v=45"></script>
+<script src="app.js?v=46"></script>
 </body>
 </html>

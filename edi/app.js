@@ -1,7 +1,7 @@
 const GROQ_API_KEY = "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";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "openai/gpt-oss-120b";
-const APP_VERSION = "v45";
+const APP_VERSION = "v46";
 const WAKE_WORD = "tiz";
 const WAKE_VARIANTS = ["tiz", "tis", "dis", "tyz", "tizz", "chis", "tiss", "tys", "thys"];
 
@@ -290,8 +290,6 @@ const TOOLS = [
 const orb = document.getElementById("orb");
 const statusEl = document.getElementById("status");
 const logEl = document.getElementById("log");
-const continuousToggle = document.getElementById("continuous");
-const stopSpeechBtn = document.getElementById("stop-speech");
 const textForm = document.getElementById("text-form");
 const textInput = document.getElementById("text-input");
 
@@ -431,7 +429,6 @@ function handleVoiceError(event) {
   if (event.error === "not-allowed" || event.error === "service-not-allowed") {
     setStatus("Microfone bloqueado. Vá em Configurações → Aplicativos → Tiz → Permissões → Microfone → Permitir.", "idle");
     addMessage("error", "Permissão de microfone negada. Autorize em Configurações → Aplicativos → Tiz → Permissões → Microfone → Permitir e abra o app de novo.");
-    continuousToggle.checked = false;
     wakeMode = false;
   } else if (event.error === "no-speech") {
     setStatus("Não ouvi nada. Tente novamente.", "idle");
@@ -626,24 +623,6 @@ orb.addEventListener("click", () => {
   startListening();
 });
 
-continuousToggle.addEventListener("change", () => {
-  wakeMode = continuousToggle.checked;
-  if (!recognition) {
-    continuousToggle.checked = false;
-    return;
-  }
-  if (wakeMode) {
-    setStatus('Modo contínuo: fale que eu escuto.', "idle");
-    startListening();
-  } else {
-    manualStop = true;
-    try { recognition.stop(); } catch (e) { /* already stopped */ }
-    setStatus("Escuta contínua desligada.", "idle");
-  }
-});
-
-stopSpeechBtn.addEventListener("click", stopSpeaking);
-
 textForm.addEventListener("submit", (event) => {
   event.preventDefault();
   const text = textInput.value.trim();
@@ -677,6 +656,22 @@ async function handleUtterance(text, fromVoice = true, confidence = 0, alternati
       busy = false;
       return;
     }
+  }
+
+  const comandoBaixo = command.toLowerCase().replace(/[.,!?;:]/g, "").trim();
+  if (/^(ativar|abrir|mostrar)( o)? manual$/.test(comandoBaixo)) {
+    textForm.classList.remove("hidden");
+    setStatus("Modo manual ativado.", "idle");
+    await speak("Modo manual ativado, senhor.");
+    busy = false;
+    return;
+  }
+  if (/^(desativar|fechar|sair do|esconder)( o)? manual$/.test(comandoBaixo)) {
+    textForm.classList.add("hidden");
+    setStatus("Modo manual desativado.", "idle");
+    await speak("Modo manual desativado.");
+    busy = false;
+    return;
   }
 
   if (fromVoice && confidence > 0 && confidence < 0.15) {

@@ -273,3 +273,7 @@ footer {
   .orb-stage { height: 200px; }
   .ring-3 { display: none; }
 }
+
+.text-form.hidden {
+  display: none;
+}
