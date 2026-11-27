@@ -435,7 +435,8 @@ function buildBrowserRecognition() {
   };
   recognition.onerror = (event) => {
     if (event.error === "not-allowed" || event.error === "service-not-allowed") {
-      setStatus("Permissão de microfone negada. Use o campo de texto.", "idle");
+      setStatus("Microfone bloqueado. Vá em Configurações → Aplicativos → Sil → Permissões → Microfone → Permitir.", "idle");
+      addMessage("error", "Permissão de microfone negada. Autorize em Configurações → Aplicativos → Sil → Permissões → Microfone → Permitir e abra o app de novo.");
       continuousToggle.checked = false;
       wakeMode = false;
     } else if (event.error === "no-speech") {
