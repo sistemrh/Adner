@@ -1,7 +1,7 @@
 const GROQ_API_KEY = "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";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "openai/gpt-oss-120b";
-const APP_VERSION = "v36";
+const APP_VERSION = "v37";
 const WAKE_WORD = "sil";
 const WAKE_VARIANTS = ["sil", "syl", "cil", "cyl", "sill", "sile", "syll", "cill", "siril", "cyril", "siri", "sila", "cecil", "sylla", "cila"];
 
@@ -477,16 +477,15 @@ function startListening() {
 }
 
 async function appVoiceDiagnostics() {
-  const plugin = window.Capacitor.Plugins.SpeechRecognition;
+  const notif = window.Capacitor.Plugins.NotificationListener;
   try {
-    const av = await plugin.available();
-    if (!av || !av.available) {
-      addMessage("error", "Reconhecimento de voz indisponível neste aparelho. Use o campo de texto.");
-      return;
-    }
-    const notif = window.Capacitor.Plugins.NotificationListener;
     const st = await notif.micStatus();
-    if (st && !st.granted) await notif.requestMic();
+    if (st && !st.granted) {
+      const req = await notif.requestMic();
+      if (req && req.granted === false) {
+        addMessage("error", "Microfone do app sem permissão. Autorize em Configurações → Aplicativos → Sil → Permissões → Microfone → Permitir e abra o app de novo.");
+      }
+    }
   } catch (e) {
     addMessage("error", "Voz no app: " + ((e && e.message) || e));
   }
@@ -503,10 +502,10 @@ if (SpeechRecognition) {
 }
 
 function createNativeRecognition() {
-  const plugin = window.Capacitor.Plugins.SpeechRecognition;
+  const plugin = window.Capacitor.Plugins.NotificationListener;
   const rec = {
     lang: "pt-BR",
-    interimResults: false,
+    interimResults: true,
     maxAlternatives: 3,
     onstart: null,
     onresult: null,
@@ -515,76 +514,83 @@ function createNativeRecognition() {
     _listening: false,
     async start() {
       if (rec._listening) return;
-      try {
-        const notif = window.Capacitor.Plugins.NotificationListener;
-        let granted = true;
-        try {
-          const st = await notif.micStatus();
-          granted = !!(st && st.granted);
-          if (!granted) {
-            await notif.requestMic();
-            await new Promise(r => setTimeout(r, 1500));
-            const st2 = await notif.micStatus();
-            granted = !!(st2 && st2.granted);
-          }
-        } catch (e) { granted = true; }
-        if (!granted) {
-          rec._listening = false;
-          if (rec.onerror) rec.onerror({ error: "not-allowed" });
-          if (rec.onend) rec.onend();
-          return;
-        }
-      } catch (e) { /* tenta o start mesmo assim */ }
       rec._listening = true;
       if (rec.onstart) rec.onstart();
+      let parciais = null;
       try {
-        let result;
-        try {
-          result = await Promise.race([
-            plugin.start({
-              language: rec.lang || "pt-BR",
-              maxResults: 3,
-              prompt: "",
-              partialResults: false,
-              popup: false
-            }),
-            new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 12000))
-          ]);
-        } catch (primeiro) {
-          result = await Promise.race([
-            plugin.start({
-              language: rec.lang || "pt-BR",
-              maxResults: 3,
-              prompt: "",
-              partialResults: false,
-              popup: true
-            }),
-            new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 15000))
-          ]);
-        }
+        parciais = await plugin.addListener("recognitionPartial", (data) => {
+          const t = (data && data.transcript) || "";
+          if (t) setStatus(`“${t}”`, "listening");
+        });
+      } catch (e) { parciais = null; }
+      const encerrar = () => {
         rec._listening = false;
-        const matches = (result && result.matches) || [];
-        if (matches.length && rec.onresult) {
-          const alts = matches.map((transcript, i) => ({
-            transcript: transcript,
-            confidence: result.confidences ? (result.confidences[i] || 0) : 0.9
-          }));
+        if (parciais) { try { parciais.remove(); } catch (e) { /* removido */ } parciais = null; }
+      };
+      const comTempo = (p, ms) => Promise.race([
+        p,
+        new Promise((_, reject) => setTimeout(() => reject({ message: "Não ouvi nada", code: "no-speech" }), ms))
+      ]);
+      const ouvir = async (ms) => {
+        const result = await comTempo(
+          plugin.startRecognition({ language: rec.lang || "pt-BR", maxResults: 3 }),
+          ms
+        );
+        const alts = ((result && result.alternatives) || []).map((a, i) => ({
+          transcript: a.transcript,
+          confidence: a.confidence || (i === 0 ? 0.9 : 0.5)
+        }));
+        if (alts.length && rec.onresult) {
           rec.onresult({
             resultIndex: 0,
             results: [Object.assign(alts, { isFinal: true })]
           });
         }
+        encerrar();
         if (rec.onend) rec.onend();
-      } catch (e) {
-        rec._listening = false;
-        setStatus("Falha na voz do app: " + ((e && e.message) || e), "idle");
-        if (rec.onerror) rec.onerror({ error: "no-speech" });
-        if (rec.onend) rec.onend();
+      };
+      try {
+        await ouvir(12000);
+      } catch (err) {
+        const code = (err && err.code) || "";
+        const msg = (err && err.message) || String(err);
+        if (code === "not-allowed" || /permiss/i.test(msg)) {
+          let req = null;
+          try { req = await plugin.requestMic(); } catch (e2) { req = null; }
+          if (req && req.granted === false) {
+            encerrar();
+            if (rec.onerror) rec.onerror({ error: "not-allowed" });
+            if (rec.onend) rec.onend();
+            return;
+          }
+          try {
+            await ouvir(15000);
+          } catch (err2) {
+            encerrar();
+            const code2 = (err2 && err2.code) || "";
+            const msg2 = (err2 && err2.message) || String(err2);
+            if (code2 !== "no-speech" && !/ouvi|entendi/i.test(msg2)) setStatus("Falha na voz do app: " + msg2, "idle");
+            if (rec.onerror) rec.onerror({ error: "no-speech" });
+            if (rec.onend) rec.onend();
+          }
+        } else if (code === "no-speech" || /ouvi|entendi/i.test(msg)) {
+          encerrar();
+          if (rec.onerror) rec.onerror({ error: "no-speech" });
+          if (rec.onend) rec.onend();
+        } else if (code === "unavailable") {
+          encerrar();
+          setStatus("Reconhecimento de voz indisponível neste aparelho. Use o campo de texto.", "idle");
+          if (rec.onend) rec.onend();
+        } else {
+          encerrar();
+          setStatus("Falha na voz do app: " + msg, "idle");
+          if (rec.onend) rec.onend();
+        }
       }
     },
     stop() {
       rec._listening = false;
-      try { plugin.stop(); } catch (e) { /* já parado */ }
+      try { plugin.stopRecognition(); } catch (e) { /* já parado */ }
     },
     abort() { rec.stop(); }
   };
