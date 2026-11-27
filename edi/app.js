@@ -1,7 +1,7 @@
 const GROQ_API_KEY = "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";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "openai/gpt-oss-120b";
-const APP_VERSION = "v49";
+const APP_VERSION = "v50";
 const WAKE_WORD = "tiz";
 const WAKE_VARIANTS = ["tiz", "tis", "dis", "tyz", "tizz", "chis", "tiss", "tys", "thys"];
 
@@ -497,6 +497,11 @@ if (NativeSpeechRecognition) {
   appVoiceDiagnostics();
   setStatus("Ouvindo… fale.", "listening");
   startListening();
+  setInterval(() => {
+    if (!busy && wakeMode && !manualStop && recognition && !recognition._listening) {
+      startListening();
+    }
+  }, 8000);
 } else if (SpeechRecognition) {
   recognition = buildBrowserRecognition();
 } else {
@@ -659,6 +664,7 @@ async function handleUtterance(text, fromVoice = true, confidence = 0, alternati
     const limpo = command.replace(/[.,!?]/g, "").trim();
     if (escutaAtiva && /^(obrigad[oa]|valeu|muito obrigad[oa])$/.test(limpo)) {
       escutaAtiva = false;
+      manualStop = false;
       orb.classList.remove("listening", "thinking", "speaking");
       setStatus("Escuta desligada. Diga Tiz para ativar.", "idle");
       await speak("Por nada, senhor.");
