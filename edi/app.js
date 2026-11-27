@@ -1,7 +1,7 @@
 const GROQ_API_KEY = "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";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "openai/gpt-oss-120b";
-const APP_VERSION = "v57";
+const APP_VERSION = "v58";
 const WAKE_WORD = "tiz";
 const WAKE_VARIANTS = ["tiz", "tis", "dis", "tyz", "tizz", "chis", "tiss", "tys", "thys", "tz", "tiche", "tige", "tix", "teez", "tchi"];
 
@@ -48,6 +48,7 @@ const SYSTEM_PROMPT = [
   "Para perguntas sobre o tempo, use a ferramenta get_weather. Se não souberem a cidade, pergunte apenas qual cidade.",
   "Quando Claudio pedir para ver ou ler as mensagens do WhatsApp, use a ferramenta get_messages e diga quem mandou e o que disseram.",
   "Para fazer uma ligação, use a ferramenta dial_phone com o número; se o número não estiver na memória, pergunte antes e sugira tomar nota para as próximas vezes.",
+  "Para perguntas sobre rota, distância ou tempo de viagem até um lugar, use a ferramenta get_route: informe a distância em quilômetros e o tempo estimado de carro em linguagem falada; use abrir=true somente quando o Claudio pedir para abrir ou traçar no GPS.",
   "Para notícias, use a ferramenta get_news e faça um resumo falado das principais: agrupe os assuntos mais relevantes em poucas frases naturais, sem listar uma por uma, e cite a fonte quando fizer sentido.",
   "Você sabe a data e a hora atuais porque elas são informadas neste prompt. Use-as sem hesitar."
 ].join(" ");
@@ -233,6 +234,22 @@ const TOOLS = [
         properties: {
           assunto: { type: "string", description: "Assunto opcional para filtrar, ex.: economia, esportes, política, Brasil. Vazio para as manchetes gerais do dia." }
         }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_route",
+      description: "Calcula a rota de carro entre dois endereços ou lugares, informando distância e tempo estimado; pode abrir a rota no GPS do celular",
+      parameters: {
+        type: "object",
+        properties: {
+          origem: { type: "string", description: "Endereço ou lugar de partida; vazio para a localização atual do celular" },
+          destino: { type: "string", description: "Endereço ou lugar de chegada" },
+          abrir: { type: "boolean", description: "True para abrir a rota no GPS do celular" }
+        },
+        required: ["destino"]
       }
     }
   },
@@ -817,6 +834,8 @@ async function askGroq() {
             result = JSON.stringify(await getWeather(args.cidade || ""));
           } else if (call.function.name === "get_news") {
             result = JSON.stringify(await getNews(args.assunto || ""));
+          } else if (call.function.name === "get_route") {
+            result = JSON.stringify(await getRoute(args.destino || "", args.origem || "", !!args.abrir));
           } else if (call.function.name === "get_messages") {
             result = JSON.stringify(await getMessages());
           } else if (call.function.name === "dial_phone") {
@@ -962,6 +981,55 @@ async function getNews(assunto) {
       return { titulo: titulo, fonte: fonte, hora: formatHour(n.pubDate) };
     })
   };
+}
+
+async function geocodeAddress(endereco) {
+  const url = "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&accept-language=pt-BR&q=" + encodeURIComponent(endereco);
+  const response = await fetch(url, { headers: { "Accept": "application/json" } });
+  if (!response.ok) throw new Error("geocoder " + response.status);
+  const lista = await response.json();
+  if (!lista || !lista.length) throw new Error("endereço não encontrado");
+  return { lat: parseFloat(lista[0].lat), lon: parseFloat(lista[0].lon), nome: lista[0].display_name };
+}
+
+function obterPosicaoAtual() {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) return resolve(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude, nome: "sua localização" }),
+      () => resolve(null),
+      { timeout: 8000, maximumAge: 60000 }
+    );
+  });
+}
+
+async function getRoute(destino, origem, abrir) {
+  if (!destino) return { erro: "Destino não informado." };
+  try {
+    const chegada = await geocodeAddress(destino);
+    const partida = origem ? await geocodeAddress(origem) : (await obterPosicaoAtual());
+    if (!partida) return { erro: "Não consegui obter a localização de partida. Diga de onde você vai sair." };
+    const url = `https://router.project-osrm.org/route/v1/driving/${partida.lon},${partida.lat};${chegada.lon},${chegada.lat}?overview=false`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error("rota " + response.status);
+    const data = await response.json();
+    if (!data.routes || !data.routes.length) return { erro: "Não encontrei rota por estrada até esse destino." };
+    const rota = data.routes[0];
+    if (abrir) {
+      const mapa = `https://www.google.com/maps/dir/?api=1&destination=${chegada.lat},${chegada.lon}&travelmode=driving` +
+        (origem ? `&origin=${partida.lat},${partida.lon}` : "");
+      try { window.open(mapa, "_blank"); } catch (e) { /* segue falando */ }
+    }
+    return {
+      destino: chegada.nome,
+      origem: partida.nome,
+      distancia_km: Math.round(rota.distance / 100) / 10,
+      duracao_min: Math.round(rota.duration / 60),
+      abriu_gps: !!abrir
+    };
+  } catch (e) {
+    return { erro: (e && e.message) || "Falha ao calcular a rota." };
+  }
 }
 
 function cleanReply(text) {
