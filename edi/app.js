@@ -399,8 +399,8 @@ async function discoverSpeechifyVoice() {
 }
 discoverSpeechifyVoice();
 
-if (SpeechRecognition) {
-  recognition = new SpeechRecognition();
+function buildBrowserRecognition() {
+  const recognition = new SpeechRecognition();
   recognition.lang = "pt-BR";
   recognition.interimResults = true;
   recognition.maxAlternatives = 3;
@@ -456,13 +456,44 @@ if (SpeechRecognition) {
       }
       setTimeout(() => {
         if (wakeMode && !busy) {
-          try { recognition.start(); } catch (e) { /* already started */ }
+          startListening();
         }
       }, 300);
     }
   };
+  return recognition;
+}
+
+function startListening() {
+  if (SpeechRecognition) {
+    recognition = buildBrowserRecognition();
+  } else if (NativeSpeechRecognition) {
+    recognition = createNativeRecognition();
+  }
+  if (!recognition) return;
+  try { recognition.start(); } catch (e) { setStatus("Aguarde um instante e toque novamente.", "idle"); }
+}
+
+async function appVoiceDiagnostics() {
+  const plugin = window.Capacitor.Plugins.SpeechRecognition;
+  try {
+    const av = await plugin.available();
+    if (!av || !av.available) {
+      addMessage("error", "Reconhecimento de voz indisponível neste aparelho. Use o campo de texto.");
+      return;
+    }
+    const perm = await plugin.checkPermissions();
+    if (perm.speechRecognition !== "granted") await plugin.requestPermissions();
+  } catch (e) {
+    addMessage("error", "Voz no app: " + ((e && e.message) || e));
+  }
+}
+
+if (SpeechRecognition) {
+  recognition = buildBrowserRecognition();
 } else if (NativeSpeechRecognition) {
   recognition = createNativeRecognition();
+  appVoiceDiagnostics();
   setStatus("Toque no núcleo para falar.", "idle");
 } else {
   setStatus("Seu navegador não suporta voz. Use o campo de texto abaixo.", "idle");
@@ -495,16 +526,30 @@ function createNativeRecognition() {
       rec._listening = true;
       if (rec.onstart) rec.onstart();
       try {
-        const result = await Promise.race([
-          plugin.start({
-            language: rec.lang || "pt-BR",
-            maxResults: 3,
-            prompt: "",
-            partialResults: false,
-            popup: false
-          }),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 12000))
-        ]);
+        let result;
+        try {
+          result = await Promise.race([
+            plugin.start({
+              language: rec.lang || "pt-BR",
+              maxResults: 3,
+              prompt: "",
+              partialResults: false,
+              popup: false
+            }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 12000))
+          ]);
+        } catch (primeiro) {
+          result = await Promise.race([
+            plugin.start({
+              language: rec.lang || "pt-BR",
+              maxResults: 3,
+              prompt: "",
+              partialResults: false,
+              popup: true
+            }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 15000))
+          ]);
+        }
         rec._listening = false;
         const matches = (result && result.matches) || [];
         if (matches.length && rec.onresult) {
@@ -520,6 +565,7 @@ function createNativeRecognition() {
         if (rec.onend) rec.onend();
       } catch (e) {
         rec._listening = false;
+        setStatus("Falha na voz do app: " + ((e && e.message) || e), "idle");
         if (rec.onerror) rec.onerror({ error: "no-speech" });
         if (rec.onend) rec.onend();
       }
@@ -544,11 +590,7 @@ orb.addEventListener("click", () => {
     setStatus("Escuta pausada. Toque de novo para falar.", "idle");
     return;
   }
-  try {
-    recognition.start();
-  } catch (e) {
-    setStatus("Aguarde um instante e toque novamente.", "idle");
-  }
+  startListening();
 });
 
 continuousToggle.addEventListener("change", () => {
@@ -559,7 +601,7 @@ continuousToggle.addEventListener("change", () => {
   }
   if (wakeMode) {
     setStatus('Modo contínuo: fale que eu escuto.', "idle");
-    try { recognition.start(); } catch (e) { /* already running */ }
+    startListening();
   } else {
     manualStop = true;
     try { recognition.stop(); } catch (e) { /* already stopped */ }
@@ -611,7 +653,7 @@ async function handleUtterance(text, fromVoice = true, confidence = 0, alternati
     orb.classList.remove("thinking", "speaking");
     if (wakeMode) {
       setStatus('Ouvindo… fale.', "idle");
-      try { recognition.start(); } catch (e) { /* already running */ }
+      startListening();
     } else {
       setStatus("Toque no núcleo para falar de novo.", "idle");
     }
@@ -645,7 +687,7 @@ async function handleUtterance(text, fromVoice = true, confidence = 0, alternati
     orb.classList.remove("thinking", "speaking");
     if (wakeMode) {
       setStatus('Ouvindo… fale.', "idle");
-      try { recognition.start(); } catch (e) { /* already running */ }
+      startListening();
     } else {
       setStatus("Toque no núcleo para falar de novo.", "idle");
     }
