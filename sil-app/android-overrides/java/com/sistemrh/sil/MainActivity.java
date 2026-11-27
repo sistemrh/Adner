@@ -9,4 +9,9 @@ public class MainActivity extends BridgeActivity {
     registerPlugin(NotificationListenerPlugin.class);
     super.onCreate(savedInstanceState);
   }
+
+  @Override
+  public void onPause() {
+    // mantém a página viva para a Tiz ouvir e responder com a tela apagada
+  }
 }
