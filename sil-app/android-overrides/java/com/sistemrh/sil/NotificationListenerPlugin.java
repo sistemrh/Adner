@@ -8,19 +8,22 @@ import android.provider.Settings;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
-import androidx.core.app.ActivityCompat;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
 import java.util.ArrayList;
 
-@CapacitorPlugin(name = "NotificationListener", requestCodes = { 2002 })
+@CapacitorPlugin(
+  name = "NotificationListener",
+  permissions = { @Permission(alias = "microfone", strings = { android.Manifest.permission.RECORD_AUDIO }) }
+)
 public class NotificationListenerPlugin extends Plugin {
   private static NotificationListenerPlugin instance;
-  private PluginCall micCall;
   private SpeechRecognizer recognizer;
 
   @Override
@@ -70,29 +73,14 @@ public class NotificationListenerPlugin extends Plugin {
       call.resolve(ok);
       return;
     }
-    final Activity act = getActivity();
-    if (act == null) {
-      call.reject("Aplicativo sem atividade ativa");
-      return;
-    }
-    micCall = call;
-    call.setKeepAlive(true);
-    act.runOnUiThread(new Runnable() {
-      @Override
-      public void run() {
-        ActivityCompat.requestPermissions(act, new String[]{ android.Manifest.permission.RECORD_AUDIO }, 2002);
-      }
-    });
+    requestPermissionForAlias("microfone", call, "micCallback");
   }
 
-  @Override
-  protected void handleRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
-    if (requestCode != 2002 || micCall == null) return;
-    PluginCall pending = micCall;
-    micCall = null;
+  @PermissionCallback
+  private void micCallback(PluginCall call) {
     JSObject ret = new JSObject();
-    ret.put("granted", grantResults.length > 0 && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED);
-    pending.resolve(ret);
+    ret.put("granted", hasMic());
+    call.resolve(ret);
   }
 
   @PluginMethod
