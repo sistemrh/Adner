@@ -546,7 +546,7 @@ continuousToggle.addEventListener("change", () => {
     return;
   }
   if (wakeMode) {
-    setStatus('Modo contínuo: diga "Sil" para me chamar.', "idle");
+    setStatus('Modo contínuo: fale que eu escuto.', "idle");
     try { recognition.start(); } catch (e) { /* already running */ }
   } else {
     manualStop = true;
@@ -584,12 +584,7 @@ async function handleUtterance(text, fromVoice = true, confidence = 0, alternati
   let command = text;
   if (fromVoice && wakeMode) {
     command = extractCommand(alternatives || [text]);
-    if (command === null) {
-      const ouvido = text.length > 60 ? text.slice(0, 60) + "…" : text;
-      addMessage("hint", `Sem \"Sil\" no início — ignorado: “${ouvido}”`);
-      busy = false;
-      return;
-    }
+    if (command === null) command = text;
     if (!command) {
       await speak("Pois não, senhor?");
       busy = false;
@@ -603,7 +598,7 @@ async function handleUtterance(text, fromVoice = true, confidence = 0, alternati
     busy = false;
     orb.classList.remove("thinking", "speaking");
     if (wakeMode) {
-      setStatus('Aguardando "Sil"…', "idle");
+      setStatus('Ouvindo… fale.', "idle");
       try { recognition.start(); } catch (e) { /* already running */ }
     } else {
       setStatus("Toque no núcleo para falar de novo.", "idle");
@@ -637,7 +632,7 @@ async function handleUtterance(text, fromVoice = true, confidence = 0, alternati
     busy = false;
     orb.classList.remove("thinking", "speaking");
     if (wakeMode) {
-      setStatus('Aguardando "Sil"…', "idle");
+      setStatus('Ouvindo… fale.', "idle");
       try { recognition.start(); } catch (e) { /* already running */ }
     } else {
       setStatus("Toque no núcleo para falar de novo.", "idle");
