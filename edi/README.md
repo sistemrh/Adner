@@ -1,4 +1,4 @@
-# Sil — Assistente de Voz
+# Tiz — Assistente de Voz
 
 Assistente de voz estilo Jarvis, 100% estático (sem backend), hospedado no GitHub Pages.
 
@@ -11,7 +11,7 @@ Assistente de voz estilo Jarvis, 100% estático (sem backend), hospedado no GitH
 - **Sabe data e hora:** injetadas no contexto a cada mensagem (horário de Brasília).
 - **Previsão do tempo:** função `get_weather` via Open-Meteo (gratuita, sem chave) — tempo atual, hoje e amanhã de qualquer cidade.
 - **Fala:** voz masculina natural "Caio" via Speechify API (chave embutida no código, conforme solicitado), com fallback para a síntese de voz do navegador.
-- **Modo contínuo:** ative a opção e diga **"Sil"** para chamá-la sem tocar na tela.
+- **Modo contínuo:** ative a opção e diga **"Tiz"** para chamá-la sem tocar na tela.
 - **Memória de longo prazo:** banco **Supabase** (tabela `memories`). "Tome nota..." grava, "esqueça..." apaga. Se o Supabase estiver indisponível, usa o cache local do navegador.
 
 ## Backend (Supabase)
@@ -37,7 +37,7 @@ Dados pessoais (família, rotinas) foram **removidos do código público** e viv
 1. Abra a URL acima no **Chrome, Edge ou Safari** (Firefox não suporta reconhecimento de voz).
 2. Autorize o microfone quando o navegador pedir.
 3. Toque no núcleo azul e fale, ou digite no campo de texto.
-4. Com a escuta contínua ligada, diga "Sil, que horas são?" ou "Sil, como está o tempo em São Paulo?".
+4. Com a escuta contínua ligada, diga "Tiz, que horas são?" ou "Tiz, como está o tempo em São Paulo?".
 
 ## ⚠️ Aviso de segurança
 

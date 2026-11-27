@@ -1,9 +1,9 @@
 const GROQ_API_KEY = "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";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "openai/gpt-oss-120b";
-const APP_VERSION = "v44";
-const WAKE_WORD = "sil";
-const WAKE_VARIANTS = ["sil", "syl", "cil", "cyl", "sill", "sile", "syll", "cill", "siril", "cyril", "siri", "sila", "cecil", "sylla", "cila"];
+const APP_VERSION = "v45";
+const WAKE_WORD = "tiz";
+const WAKE_VARIANTS = ["tiz", "tis", "dis", "tyz", "tizz", "chis", "tiss", "tys", "thys"];
 
 const SPEECHIFY_API_KEYS = ["sk_aws5h0bt4k98pf3kz5nfcd1w00w2hqsash8wtxrk5sw"];
 const SPEECHIFY_API_KEY = SPEECHIFY_API_KEYS[0];
@@ -28,7 +28,7 @@ const WMO_CODES = {
 };
 
 const SYSTEM_PROMPT = [
-  "Você é Sil, uma voz com personalidade inspirada no Jarvis dos filmes do Homem de Ferro.",
+  "Você é Tiz, uma voz com personalidade inspirada no Jarvis dos filmes do Homem de Ferro.",
   "Você é extremamente competente, leal, elegante e tem um humor sutil e britânico.",
   "Responda sempre em português do Brasil, de forma curta e natural para ser falada em voz alta.",
   "Responda em no máximo duas frases curtas, sobre um único assunto: apenas o que foi perguntado, sem repetir a rotina inteira nem recitar a memória.",
@@ -429,8 +429,8 @@ function handleVoiceResult(event) {
 
 function handleVoiceError(event) {
   if (event.error === "not-allowed" || event.error === "service-not-allowed") {
-    setStatus("Microfone bloqueado. Vá em Configurações → Aplicativos → Sil → Permissões → Microfone → Permitir.", "idle");
-    addMessage("error", "Permissão de microfone negada. Autorize em Configurações → Aplicativos → Sil → Permissões → Microfone → Permitir e abra o app de novo.");
+    setStatus("Microfone bloqueado. Vá em Configurações → Aplicativos → Tiz → Permissões → Microfone → Permitir.", "idle");
+    addMessage("error", "Permissão de microfone negada. Autorize em Configurações → Aplicativos → Tiz → Permissões → Microfone → Permitir e abra o app de novo.");
     continuousToggle.checked = false;
     wakeMode = false;
   } else if (event.error === "no-speech") {
@@ -555,7 +555,7 @@ function createNativeRecognition() {
           try { st = await plugin.micStatus(); } catch (e3) { st = { erro: String((e3 && e3.message) || e3) }; }
           encerrar();
           if (st && st.granted && st.available !== false) {
-            addMessage("error", "A permissão do Sil está certa, mas o serviço de voz do Google está sem microfone. Vá em Configurações → Apps → Google → Permissões → Microfone → Permitir o tempo todo. Estado: " + JSON.stringify(st));
+            addMessage("error", "A permissão do Tiz está certa, mas o serviço de voz do Google está sem microfone. Vá em Configurações → Apps → Google → Permissões → Microfone → Permitir o tempo todo. Estado: " + JSON.stringify(st));
           } else {
             try { await plugin.openAppSettings({}); } catch (e4) { /* segue */ }
             addMessage("error", "Microfone negado pelo Android. Na tela aberta: Permissões → Microfone → Permitir o tempo todo (evite ‘Só desta vez’), volte e toque no núcleo. Estado: " + JSON.stringify(st));
@@ -1094,7 +1094,7 @@ function addMessage(kind, text) {
   if (kind === "user" || kind === "edi") {
     const who = document.createElement("span");
     who.className = "who";
-    who.textContent = kind === "user" ? "Você" : "Sil";
+    who.textContent = kind === "user" ? "Você" : "Tiz";
     div.appendChild(who);
   }
   div.appendChild(document.createTextNode(text));
@@ -1107,4 +1107,4 @@ if ("speechSynthesis" in window) {
   window.speechSynthesis.getVoices();
 }
 
-addMessage("hint", `Sil ${APP_VERSION} — carregada.`);
+addMessage("hint", `Tiz ${APP_VERSION} — carregada.`);
