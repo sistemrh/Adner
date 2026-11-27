@@ -1,12 +1,13 @@
-const GROQ_API_KEY = "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";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "openai/gpt-oss-120b";
-const APP_VERSION = "v61";
+const MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions";
+const MISTRAL_MODEL = "mistral-small-latest";
+const CONFIG_TABLE = "config";
+const APP_VERSION = "v62";
 const WAKE_WORD = "tiz";
 const WAKE_VARIANTS = ["tiz", "tis", "dis", "tyz", "tizz", "chis", "tiss", "tys", "thys", "tz", "tiche", "tige", "tix", "teez", "tchi"];
 
-const SPEECHIFY_API_KEYS = ["sk_aws5h0bt4k98pf3kz5nfcd1w00w2hqsash8wtxrk5sw"];
-const SPEECHIFY_API_KEY = SPEECHIFY_API_KEYS[0];
+let SPEECHIFY_API_KEYS = [];
 const SPEECHIFY_URL = "https://api.speechify.ai/v1/audio/stream";
 const SPEECHIFY_VOICES_URL = "https://api.speechify.ai/v1/voices";
 const SPEECHIFY_MODELS = ["simba-multilingual", "simba-3.2", "simba-3.0", "simba-english"];
@@ -793,13 +794,47 @@ function injectDateTime() {
   history[0] = { role: "system", content: context };
 }
 
-const LLM_PROVIDERS = [
-  { nome: "Groq 1", url: GROQ_API_URL, key: GROQ_API_KEY, model: GROQ_MODEL },
-  { nome: "Mistral", url: "https://api.mistral.ai/v1/chat/completions", key: "mstrl_BaJ8gPotm2iTY6saMyYOipRY8436Sf5H_0SyJuM", model: "mistral-small-latest" }
-];
+let LLM_PROVIDERS = [];
 let llmAtivo = 0;
+let chavesProntas = null;
+
+function construirProvedores(config) {
+  const provedores = [];
+  let indice = 1;
+  for (const item of config) {
+    const valor = (item.valor || "").trim();
+    if (!valor) continue;
+    if (item.chave === "mistral") {
+      provedores.push({ nome: "Mistral", url: MISTRAL_API_URL, key: valor, model: MISTRAL_MODEL });
+    } else if (/^groq(_\d+)?$/.test(item.chave)) {
+      provedores.push({ nome: "Groq " + indice, url: GROQ_API_URL, key: valor, model: GROQ_MODEL });
+      indice++;
+    }
+  }
+  return provedores;
+}
+
+async function carregarChaves() {
+  try {
+    const response = await supabaseRequest(`${CONFIG_TABLE}?select=chave,valor&order=chave.asc`);
+    const config = await response.json();
+    LLM_PROVIDERS = construirProvedores(config);
+    const fala = config.find(item => item.chave === "speechify");
+    SPEECHIFY_API_KEYS = fala ? fala.valor.split(",").map(k => k.trim()).filter(Boolean) : [];
+    if (!LLM_PROVIDERS.length) addMessage("error", "Nenhuma chave de inteligência no Supabase (tabela config).");
+  } catch (e) {
+    addMessage("error", "Não consegui ler as chaves no Supabase: " + ((e && e.message) || e));
+  }
+  return LLM_PROVIDERS.length > 0;
+}
+
+function aguardarChaves() {
+  if (!chavesProntas) chavesProntas = carregarChaves();
+  return chavesProntas;
+}
 
 async function askGroq() {
+  await aguardarChaves();
   for (let hop = 0; hop < 3; hop++) {
     injectDateTime();
     let data = null;
