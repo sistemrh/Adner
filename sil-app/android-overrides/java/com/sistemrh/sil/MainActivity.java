@@ -12,6 +12,10 @@ public class MainActivity extends BridgeActivity {
 
   @Override
   public void onPause() {
-    // mantém a página viva para a Tiz ouvir e responder com a tela apagada
+    super.onPause();
+    if (bridge != null && bridge.getWebView() != null) {
+      bridge.getWebView().onResume();
+      bridge.getWebView().resumeTimers();
+    }
   }
 }

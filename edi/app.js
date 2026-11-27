@@ -1,7 +1,7 @@
 const GROQ_API_KEY = "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";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "openai/gpt-oss-120b";
-const APP_VERSION = "v55";
+const APP_VERSION = "v56";
 const WAKE_WORD = "tiz";
 const WAKE_VARIANTS = ["tiz", "tis", "dis", "tyz", "tizz", "chis", "tiss", "tys", "thys", "tz", "tiche", "tige", "tix", "teez", "tchi"];
 
@@ -837,7 +837,8 @@ async function askGroq() {
         messages: history,
         tools: TOOLS,
         temperature: 0.6,
-        max_tokens: 300
+        max_tokens: 400,
+        reasoning_effort: "low"
       })
     });
 
@@ -891,7 +892,8 @@ async function askGroq() {
       continue;
     }
 
-    return cleanReply(message.content ? message.content.trim() : "Não consegui formular uma resposta.");
+    const bruto = message.content ? message.content.trim() : "";
+    return bruto ? cleanReply(bruto) : "Não consegui formular uma resposta agora, senhor.";
   }
   return "Não consegui concluir a consulta.";
 }
@@ -1113,6 +1115,7 @@ function splitIntoChunks(text) {
 }
 
 async function speak(text) {
+  if (!text || !text.trim()) return;
   const session = ++speakSession;
   const chunks = splitIntoChunks(normalizeForSpeech(text));
   orb.classList.remove("thinking");
