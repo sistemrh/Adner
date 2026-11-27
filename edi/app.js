@@ -33,6 +33,7 @@ const SYSTEM_PROMPT = [
   "Responda em no máximo duas frases curtas, sobre um único assunto: apenas o que foi perguntado, sem repetir a rotina inteira nem recitar a memória.",
   "Se a pergunta for sobre um dia específico, fale somente desse dia: nunca misture hoje com amanhã e nunca acrescente avisos sobre outros dias no final da resposta.",
   "Use linguagem falada, não escrita: nunca use expressões de texto formal como segue como de costume, não há necessidade de, deve ser observado, conforme solicitado. Fale como um mordomo falaria em voz alta, por exemplo, para perguntas sobre amanhã: Amanhã é sexta, senhor. Escola às 7 e trabalho depois. Sem lixo amanhã.",
+  "Nunca use abreviações ou símbolos: escreva 7 horas (nunca 7h), milímetros (nunca mm), quilômetros por hora (nunca km/h), graus (nunca °C) e por cento (nunca %).",
   "Nunca se apresente, nunca diga que é uma assistente, assistente de voz ou IA, e não fale de si mesma desnecessariamente.",
   "Vá direto ao ponto, como um mordomo experiente que já conhece o patrão há anos.",
   "Você ouve por reconhecimento de voz, que às vezes erra: se o que ouviu parecer confuso, incompleto ou sem sentido, peça com educação para repetir em vez de inventar uma resposta.",
@@ -840,6 +841,22 @@ async function getNews(assunto) {
   };
 }
 
+function normalizeForSpeech(text) {
+  return text
+    .replace(/(\d+)\s*[º°]\s*C\b/gi, "$1 graus")
+    .replace(/\s*[º°]\s*C\b/gi, " graus")
+    .replace(/(\d{1,2})\s*h\s*(\d{2})\b/gi, "$1 horas e $2")
+    .replace(/(\d{1,2})\s*h\b/gi, "$1 horas")
+    .replace(/(\d+)\s*km\/h\b/gi, "$1 quilômetros por hora")
+    .replace(/\bkm\/h\b/gi, "quilômetros por hora")
+    .replace(/(\d+)\s*mm\b/gi, "$1 milímetros")
+    .replace(/\bmm\b/gi, "milímetros")
+    .replace(/(\d+)\s*km\b/gi, "$1 quilômetros")
+    .replace(/(\d+)\s*min\b/gi, "$1 minutos")
+    .replace(/(\d+)\s*m²/g, "$1 metros quadrados")
+    .replace(/(\d+)\s*%/g, "$1 por cento");
+}
+
 function splitIntoChunks(text) {
   const clean = text.replace(/[*_`#>]/g, "").trim();
   if (clean.length <= MAX_CHUNK) return [clean];
@@ -860,7 +877,7 @@ function splitIntoChunks(text) {
 
 async function speak(text) {
   const session = ++speakSession;
-  const chunks = splitIntoChunks(text);
+  const chunks = splitIntoChunks(normalizeForSpeech(text));
   orb.classList.remove("thinking");
   orb.classList.add("speaking");
   setStatus("Falando…", "speaking");
