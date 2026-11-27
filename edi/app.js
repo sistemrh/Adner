@@ -1,7 +1,7 @@
 const GROQ_API_KEY = "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";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "openai/gpt-oss-120b";
-const APP_VERSION = "v47";
+const APP_VERSION = "v48";
 const WAKE_WORD = "tiz";
 const WAKE_VARIANTS = ["tiz", "tis", "dis", "tyz", "tizz", "chis", "tiss", "tys", "thys"];
 
@@ -622,6 +622,8 @@ orb.addEventListener("click", () => {
     setStatus("Escuta pausada. Toque de novo para falar.", "idle");
     return;
   }
+  wakeMode = true;
+  manualStop = false;
   startListening();
 });
 
@@ -652,12 +654,25 @@ async function handleUtterance(text, fromVoice = true, confidence = 0, alternati
   let command = text;
   if (fromVoice && wakeMode) {
     command = extractCommand(alternatives || [text]);
-    if (command === null) command = text;
+    if (command === null) {
+      busy = false;
+      return;
+    }
     if (!command) {
       await speak("Pois não, senhor?");
       busy = false;
       return;
     }
+  }
+
+  if (fromVoice && /^(obrigad[oa]|valeu|muito obrigad[oa])$/.test(command.replace(/[.,!?]/g, "").trim())) {
+    wakeMode = false;
+    manualStop = true;
+    orb.classList.remove("listening", "thinking", "speaking");
+    setStatus("Escuta pausada. Toque no núcleo quando quiser falar.", "idle");
+    await speak("Por nada, senhor.");
+    busy = false;
+    return;
   }
 
   const comandoBaixo = command.toLowerCase().replace(/[.,!?;:]/g, "").trim();
