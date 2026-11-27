@@ -84,7 +84,7 @@ public class NotificationListenerPlugin extends Plugin {
   }
 
   @Override
-  protected void handleOnPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+  protected void handleRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
     if (requestCode != 2002 || micCall == null) return;
     PluginCall pending = micCall;
     micCall = null;
