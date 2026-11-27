@@ -1,7 +1,7 @@
 const GROQ_API_KEY = "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";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "openai/gpt-oss-120b";
-const APP_VERSION = "v41";
+const APP_VERSION = "v42";
 const WAKE_WORD = "sil";
 const WAKE_VARIANTS = ["sil", "syl", "cil", "cyl", "sill", "sile", "syll", "cill", "siril", "cyril", "siri", "sila", "cecil", "sylla", "cila"];
 
@@ -480,6 +480,9 @@ async function appVoiceDiagnostics() {
   try {
     const st = await window.Capacitor.Plugins.NotificationListener.micStatus();
     addMessage("hint", `Mic: ${st.granted ? "autorizado" : "NEGADO"} · Voz: ${st.available === false ? "indisponível" : "ok"} · ${st.pkg} (Android ${st.sdk})`);
+    if (st && st.granted === false) {
+      addMessage("hint", "Dica: autorize o microfone como ‘Permitir o tempo todo’, nunca como ‘Só desta vez’.");
+    }
   } catch (e) {
     addMessage("error", "Diagnóstico de voz: " + ((e && e.message) || e));
   }
@@ -544,8 +547,13 @@ function createNativeRecognition() {
         if (code === "not-allowed" || /permiss/i.test(msg)) {
           let st = null;
           try { st = await plugin.micStatus(); } catch (e3) { st = { erro: String((e3 && e3.message) || e3) }; }
-          plugin.openAppSettings().catch(() => { });
-          addMessage("error", "Microfone negado pelo Android. Na tela aberta toque em Permissões → Microfone → Permitir, volte e toque no núcleo. Estado real: " + JSON.stringify(st));
+          encerrar();
+          if (st && st.granted && st.available !== false) {
+            addMessage("error", "A permissão do Sil está certa, mas o serviço de voz do Google está sem microfone. Vá em Configurações → Apps → Google → Permissões → Microfone → Permitir o tempo todo. Estado: " + JSON.stringify(st));
+          } else {
+            try { await plugin.openAppSettings({}); } catch (e4) { /* segue */ }
+            addMessage("error", "Microfone negado pelo Android. Na tela aberta: Permissões → Microfone → Permitir o tempo todo (evite ‘Só desta vez’), volte e toque no núcleo. Estado: " + JSON.stringify(st));
+          }
           if (rec.onend) rec.onend();
           return;
         }
