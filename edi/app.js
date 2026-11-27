@@ -298,6 +298,17 @@ const history = [
   { role: "system", content: SYSTEM_PROMPT }
 ];
 
+window.addEventListener("error", (event) => {
+  const detalhe = (event && event.message) || "erro desconhecido";
+  addMessage("error", "Erro interno: " + detalhe);
+  setStatus("Encontrei uma falha interna.", "idle");
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  const motivo = event && event.reason && event.reason.message ? event.reason.message : "falha desconhecida";
+  addMessage("error", "Falha interna: " + motivo);
+});
+
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 const NativeSpeechRecognition = (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.SpeechRecognition) || null;
 let recognition = null;
@@ -865,7 +876,7 @@ function normalizeForSpeech(text) {
 function splitIntoChunks(text) {
   const clean = text.replace(/[*_`#>]/g, "").trim();
   if (clean.length <= MAX_CHUNK) return [clean];
-  const sentences = clean.split(/(?<=[.!?…])\s+/);
+  const sentences = clean.replace(/([.!?…])\s+/g, "$1\u0001").split("\u0001");
   const chunks = [];
   let current = "";
   for (const sentence of sentences) {
