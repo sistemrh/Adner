@@ -1,7 +1,7 @@
 const GROQ_API_KEY = "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";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "openai/gpt-oss-120b";
-const APP_VERSION = "v35";
+const APP_VERSION = "v36";
 const WAKE_WORD = "sil";
 const WAKE_VARIANTS = ["sil", "syl", "cil", "cyl", "sill", "sile", "syll", "cill", "siril", "cyril", "siri", "sila", "cecil", "sylla", "cila"];
 
@@ -633,7 +633,7 @@ textForm.addEventListener("submit", (event) => {
 
 function stopSpeaking() {
   speakSession++;
-  window.speechSynthesis.cancel();
+  if ("speechSynthesis" in window) window.speechSynthesis.cancel();
   if (audioPlayer) {
     audioPlayer.pause();
     audioPlayer.src = "";
