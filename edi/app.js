@@ -4,7 +4,8 @@ const GROQ_MODEL = "openai/gpt-oss-120b";
 const WAKE_WORD = "sil";
 const WAKE_VARIANTS = ["sil", "syl", "cil", "cyl", "sill", "sile", "syll", "cill", "siril", "cyril", "siri", "sila", "cecil", "sylla", "cila"];
 
-const SPEECHIFY_API_KEY = "sk_aws5h0bt4k98pf3kz5nfcd1w00w2hqsash8wtxrk5sw";
+const SPEECHIFY_API_KEYS = ["sk_aws5h0bt4k98pf3kz5nfcd1w00w2hqsash8wtxrk5sw"];
+const SPEECHIFY_API_KEY = SPEECHIFY_API_KEYS[0];
 const SPEECHIFY_URL = "https://api.speechify.ai/v1/audio/stream";
 const SPEECHIFY_VOICES_URL = "https://api.speechify.ai/v1/voices";
 const SPEECHIFY_MODELS = ["simba-multilingual", "simba-3.2", "simba-3.0", "simba-english"];
@@ -306,6 +307,8 @@ let audioPlayer = new Audio();
 let speakSession = 0;
 let speechifyVoiceId = localStorage.getItem("edi-speechify-voice") || "";
 let speechifyModel = localStorage.getItem("edi-speechify-model") || "";
+let speechifyKeyIndex = parseInt(localStorage.getItem("edi-speechify-key") || "0", 10) || 0;
+if (speechifyKeyIndex >= SPEECHIFY_API_KEYS.length) speechifyKeyIndex = 0;
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -361,9 +364,10 @@ async function discoverSpeechifyVoice() {
     "?type=shared&limit=200"
   ];
   for (const qs of variants) {
+    for (const apiKey of SPEECHIFY_API_KEYS) {
     try {
       const response = await fetch(SPEECHIFY_VOICES_URL + qs, {
-        headers: { "Authorization": "Bearer " + SPEECHIFY_API_KEY }
+        headers: { "Authorization": "Bearer " + apiKey }
       });
       if (!response.ok) continue;
       const data = await response.json();
@@ -376,6 +380,7 @@ async function discoverSpeechifyVoice() {
         return;
       }
     } catch (e) { /* try next variant */ }
+    }
   }
   if (!speechifyVoiceId) speechifyVoiceId = SPEECHIFY_FALLBACK_VOICE;
 }
@@ -879,25 +884,34 @@ async function speakWithSpeechify(text, session) {
   if (!speechifyVoiceId) await discoverSpeechifyVoice();
   const models = [speechifyModel, ...SPEECHIFY_MODELS].filter((m, i, arr) => m && arr.indexOf(m) === i);
   try {
-    for (const model of models) {
-      const response = await fetch(SPEECHIFY_URL, {
-        method: "POST",
-        headers: {
-          "Authorization": "Bearer " + SPEECHIFY_API_KEY,
-          "Content-Type": "application/json",
-          "Accept": "audio/mpeg"
-        },
-        body: JSON.stringify({
-          input: text,
-          voice_id: speechifyVoiceId,
-          model: model
-        })
-      });
-      if (!response.ok) continue;
-      speechifyModel = model;
-      localStorage.setItem("edi-speechify-model", model);
-      const blob = await response.blob();
-      return await playBlob(blob, session);
+    for (let offset = 0; offset < SPEECHIFY_API_KEYS.length; offset++) {
+      const keyIndex = (speechifyKeyIndex + offset) % SPEECHIFY_API_KEYS.length;
+      const apiKey = SPEECHIFY_API_KEYS[keyIndex];
+      for (const model of models) {
+        const response = await fetch(SPEECHIFY_URL, {
+          method: "POST",
+          headers: {
+            "Authorization": "Bearer " + apiKey,
+            "Content-Type": "application/json",
+            "Accept": "audio/mpeg"
+          },
+          body: JSON.stringify({
+            input: text,
+            voice_id: speechifyVoiceId,
+            model: model
+          })
+        });
+        if (!response.ok) {
+          if (response.status === 401 || response.status === 402 || response.status === 429) break;
+          continue;
+        }
+        speechifyKeyIndex = keyIndex;
+        localStorage.setItem("edi-speechify-key", String(keyIndex));
+        speechifyModel = model;
+        localStorage.setItem("edi-speechify-model", model);
+        const blob = await response.blob();
+        return await playBlob(blob, session);
+      }
     }
     return false;
   } catch (e) {
