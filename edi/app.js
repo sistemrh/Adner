@@ -312,6 +312,7 @@ window.addEventListener("unhandledrejection", (event) => {
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 const NativeSpeechRecognition = (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.SpeechRecognition) || null;
 let recognition = null;
+let pendingInterim = "";
 let wakeMode = false;
 let manualStop = false;
 let busy = false;
@@ -424,8 +425,13 @@ if (SpeechRecognition) {
         interimText += result[0].transcript;
       }
     }
-    if (finalText.trim()) handleUtterance(finalText.trim(), true, confidence, alternatives);
-    else if (interimText.trim()) setStatus(`“${interimText.trim()}”`, "listening");
+    if (finalText.trim()) {
+      pendingInterim = "";
+      handleUtterance(finalText.trim(), true, confidence, alternatives);
+    } else if (interimText.trim()) {
+      pendingInterim = interimText.trim();
+      setStatus(`“${pendingInterim}”`, "listening");
+    }
   };
   recognition.onerror = (event) => {
     if (event.error === "not-allowed" || event.error === "service-not-allowed") {
@@ -441,7 +447,13 @@ if (SpeechRecognition) {
   };
   recognition.onend = () => {
     if (!busy) orb.classList.remove("listening");
-    if (wakeMode && !busy && !manualStop) {
+    const aproximado = pendingInterim;
+    pendingInterim = "";
+    if (!busy && wakeMode && !manualStop) {
+      if (aproximado) {
+        handleUtterance(aproximado, true, 0, [aproximado]);
+        return;
+      }
       setTimeout(() => {
         if (wakeMode && !busy) {
           try { recognition.start(); } catch (e) { /* already started */ }
@@ -592,7 +604,7 @@ async function handleUtterance(text, fromVoice = true, confidence = 0, alternati
     }
   }
 
-  if (fromVoice && confidence > 0 && confidence < 0.35) {
+  if (fromVoice && confidence > 0 && confidence < 0.15) {
     addMessage("user", text);
     await speak("Desculpe, não consegui entender bem. Pode repetir, senhor?");
     busy = false;
