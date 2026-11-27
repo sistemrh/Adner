@@ -1,7 +1,7 @@
 const GROQ_API_KEY = "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";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "openai/gpt-oss-120b";
-const APP_VERSION = "v58";
+const APP_VERSION = "v59";
 const WAKE_WORD = "tiz";
 const WAKE_VARIANTS = ["tiz", "tis", "dis", "tyz", "tizz", "chis", "tiss", "tys", "thys", "tz", "tiche", "tige", "tix", "teez", "tchi"];
 
@@ -744,7 +744,7 @@ async function handleUtterance(text, fromVoice = true, confidence = 0, alternati
   try { localStorage.setItem(LAST_CHAT_KEY, new Date().toISOString()); } catch (e) { /* private mode */ }
 
   history.push({ role: "user", content: command });
-  while (history.length > 21) history.splice(1, 2);
+  while (history.length > 11) history.splice(1, 2);
 
   try {
     const reply = await askGroq();
@@ -796,31 +796,40 @@ function injectDateTime() {
 async function askGroq() {
   for (let hop = 0; hop < 3; hop++) {
     injectDateTime();
-    const response = await fetch(GROQ_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer " + GROQ_API_KEY
-      },
-      body: JSON.stringify({
-        model: GROQ_MODEL,
-        messages: history,
-        tools: TOOLS,
-        temperature: 0.6,
-        max_tokens: 300
-      })
-    });
-
-    if (!response.ok) {
-      let detail = response.status + " " + response.statusText;
+    let data = null;
+    let erro = "Falha de conexão.";
+    for (let tentativa = 0; tentativa < 3; tentativa++) {
+      const response = await fetch(GROQ_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + GROQ_API_KEY
+        },
+        body: JSON.stringify({
+          model: GROQ_MODEL,
+          messages: history,
+          tools: TOOLS,
+          temperature: 0.6,
+          max_tokens: 300
+        })
+      });
+      if (response.ok) {
+        data = await response.json();
+        break;
+      }
+      erro = response.status + " " + response.statusText;
       try {
-        const data = await response.json();
-        if (data.error && data.error.message) detail = data.error.message;
-      } catch (e) { /* keep status text */ }
-      throw new Error(detail);
+        const detalhe = await response.json();
+        if (detalhe.error && detalhe.error.message) erro = detalhe.error.message.split(".")[0];
+      } catch (e) { /* mantém o status */ }
+      if (response.status === 429 || response.status >= 500) {
+        await new Promise(r => setTimeout(r, 2500 + tentativa * 2500));
+        continue;
+      }
+      throw new Error(erro);
     }
+    if (!data) throw new Error(erro || "Groq ocupado; tente de novo em instantes.");
 
-    const data = await response.json();
     const message = data.choices && data.choices[0] && data.choices[0].message;
     if (!message) return "Não consegui formular uma resposta.";
 
