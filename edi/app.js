@@ -1,7 +1,7 @@
 const GROQ_API_KEY = "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";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "openai/gpt-oss-120b";
-const APP_VERSION = "v48";
+const APP_VERSION = "v49";
 const WAKE_WORD = "tiz";
 const WAKE_VARIANTS = ["tiz", "tis", "dis", "tyz", "tizz", "chis", "tiss", "tys", "thys"];
 
@@ -313,6 +313,7 @@ const NativeSpeechRecognition = (window.Capacitor && window.Capacitor.Plugins &&
 let recognition = null;
 let pendingInterim = "";
 let wakeMode = true;
+let escutaAtiva = false;
 let manualStop = false;
 let busy = false;
 let audioPlayer = new Audio();
@@ -618,10 +619,12 @@ orb.addEventListener("click", () => {
   }
   if (orb.classList.contains("listening")) {
     manualStop = true;
+    escutaAtiva = false;
     recognition.stop();
     setStatus("Escuta pausada. Toque de novo para falar.", "idle");
     return;
   }
+  escutaAtiva = true;
   wakeMode = true;
   manualStop = false;
   startListening();
@@ -652,27 +655,30 @@ async function handleUtterance(text, fromVoice = true, confidence = 0, alternati
   manualStop = false;
 
   let command = text;
-  if (fromVoice && wakeMode) {
-    command = extractCommand(alternatives || [text]);
-    if (command === null) {
+  if (fromVoice) {
+    const limpo = command.replace(/[.,!?]/g, "").trim();
+    if (escutaAtiva && /^(obrigad[oa]|valeu|muito obrigad[oa])$/.test(limpo)) {
+      escutaAtiva = false;
+      orb.classList.remove("listening", "thinking", "speaking");
+      setStatus("Escuta desligada. Diga Tiz para ativar.", "idle");
+      await speak("Por nada, senhor.");
       busy = false;
       return;
     }
-    if (!command) {
-      await speak("Pois não, senhor?");
-      busy = false;
-      return;
+    if (!escutaAtiva) {
+      const despertado = extractCommand(alternatives || [text]);
+      if (despertado === null) {
+        busy = false;
+        return;
+      }
+      escutaAtiva = true;
+      if (!despertado) {
+        await speak("Pois não, senhor?");
+        busy = false;
+        return;
+      }
+      command = despertado;
     }
-  }
-
-  if (fromVoice && /^(obrigad[oa]|valeu|muito obrigad[oa])$/.test(command.replace(/[.,!?]/g, "").trim())) {
-    wakeMode = false;
-    manualStop = true;
-    orb.classList.remove("listening", "thinking", "speaking");
-    setStatus("Escuta pausada. Toque no núcleo quando quiser falar.", "idle");
-    await speak("Por nada, senhor.");
-    busy = false;
-    return;
   }
 
   const comandoBaixo = command.toLowerCase().replace(/[.,!?;:]/g, "").trim();
