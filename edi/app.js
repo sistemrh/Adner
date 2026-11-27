@@ -483,8 +483,9 @@ async function appVoiceDiagnostics() {
       addMessage("error", "Reconhecimento de voz indisponível neste aparelho. Use o campo de texto.");
       return;
     }
-    const perm = await plugin.checkPermissions();
-    if (perm.speechRecognition !== "granted") await plugin.requestPermissions();
+    const notif = window.Capacitor.Plugins.NotificationListener;
+    const st = await notif.micStatus();
+    if (st && !st.granted) await notif.requestMic();
   } catch (e) {
     addMessage("error", "Voz no app: " + ((e && e.message) || e));
   }
@@ -514,16 +515,25 @@ function createNativeRecognition() {
     async start() {
       if (rec._listening) return;
       try {
-        const perm = await plugin.checkPermissions();
-        if (perm.speechRecognition !== "granted") {
-          const asked = await plugin.requestPermissions();
-          if (asked.speechRecognition !== "granted") {
-            if (rec.onerror) rec.onerror({ error: "not-allowed" });
-            if (rec.onend) rec.onend();
-            return;
+        const notif = window.Capacitor.Plugins.NotificationListener;
+        let granted = true;
+        try {
+          const st = await notif.micStatus();
+          granted = !!(st && st.granted);
+          if (!granted) {
+            await notif.requestMic();
+            await new Promise(r => setTimeout(r, 1500));
+            const st2 = await notif.micStatus();
+            granted = !!(st2 && st2.granted);
           }
+        } catch (e) { granted = true; }
+        if (!granted) {
+          rec._listening = false;
+          if (rec.onerror) rec.onerror({ error: "not-allowed" });
+          if (rec.onend) rec.onend();
+          return;
         }
-      } catch (e) { /* deixa o start falhar naturalmente se der problema */ }
+      } catch (e) { /* tenta o start mesmo assim */ }
       rec._listening = true;
       if (rec.onstart) rec.onstart();
       try {

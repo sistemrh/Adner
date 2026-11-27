@@ -40,6 +40,24 @@ public class NotificationListenerPlugin extends Plugin {
   }
 
   @PluginMethod
+  public void micStatus(PluginCall call) {
+    JSObject ret = new JSObject();
+    boolean granted = android.os.Build.VERSION.SDK_INT < 23
+      || getContext().checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED;
+    ret.put("granted", granted);
+    call.resolve(ret);
+  }
+
+  @PluginMethod
+  public void requestMic(PluginCall call) {
+    if (android.os.Build.VERSION.SDK_INT >= 23 && getActivity() != null) {
+      androidx.core.app.ActivityCompat.requestPermissions(getActivity(),
+        new String[]{ android.Manifest.permission.RECORD_AUDIO }, 2002);
+    }
+    call.resolve();
+  }
+
+  @PluginMethod
   public void openSettings(PluginCall call) {
     Intent intent = new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS);
     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);

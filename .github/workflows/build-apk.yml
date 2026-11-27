@@ -35,6 +35,7 @@ jobs:
           npx cap add android
           cp android-overrides/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
           cp android-overrides/java/com/sistemrh/sil/*.java android/app/src/main/java/com/sistemrh/sil/
+          python3 android-overrides/patch_signing.py
           npx cap sync android
 
       - name: Compilar APK
