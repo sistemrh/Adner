@@ -1,7 +1,7 @@
 const GROQ_API_KEY = "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";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "openai/gpt-oss-120b";
-const APP_VERSION = "v39";
+const APP_VERSION = "v40";
 const WAKE_WORD = "sil";
 const WAKE_VARIANTS = ["sil", "syl", "cil", "cyl", "sill", "sile", "syll", "cill", "siril", "cyril", "siri", "sila", "cecil", "sylla", "cila"];
 
@@ -311,7 +311,7 @@ window.addEventListener("unhandledrejection", (event) => {
 });
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-const NativeSpeechRecognition = (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.SpeechRecognition) || null;
+const NativeSpeechRecognition = (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NotificationListener) || null;
 let recognition = null;
 let pendingInterim = "";
 let wakeMode = false;
@@ -477,14 +477,13 @@ function startListening() {
 }
 
 async function appVoiceDiagnostics() {
-  const notif = window.Capacitor.Plugins.NotificationListener;
   try {
-    const st = await notif.micStatus();
-    if (st && !st.granted) {
-      addMessage("hint", "Microfone ainda sem permissão — o Sil vai pedir quando você tocar no núcleo.");
-    }
+    const st = await window.Capacitor.Plugins.NotificationListener.micStatus();
+    const mic = st && st.granted ? "autorizado" : "sem permissão";
+    const voz = st && st.available === false ? "indisponível neste aparelho" : "ok";
+    addMessage("hint", `Microfone: ${mic} · Voz do aparelho: ${voz}`);
   } catch (e) {
-    addMessage("error", "Voz no app: " + ((e && e.message) || e));
+    addMessage("error", "Diagnóstico de voz falhou: " + ((e && e.message) || e));
   }
 }
 
@@ -524,15 +523,25 @@ function createNativeRecognition() {
         rec._listening = false;
         if (parciais) { try { parciais.remove(); } catch (e) { /* removido */ } parciais = null; }
       };
-      const comTempo = (p, ms) => Promise.race([
-        p,
-        new Promise((_, reject) => setTimeout(() => reject({ message: "Não ouvi nada", code: "no-speech" }), ms))
-      ]);
-      const ouvir = async (ms) => {
-        const result = await comTempo(
+      const semMicrofone = () => {
+        encerrar();
+        plugin.openAppSettings().catch(() => { });
+        addMessage("error", "O Sil precisa do microfone: autorize o Sil na tela de Permissões que abriu e toque no núcleo de novo.");
+        if (rec.onend) rec.onend();
+      };
+      try {
+        let st = null;
+        try { st = await plugin.micStatus(); } catch (e) { st = null; }
+        if (st && st.granted === false) {
+          let req = null;
+          try { req = await plugin.requestMic(); } catch (e2) { req = null; }
+          if (!req || req.granted === false) { semMicrofone(); return; }
+        }
+        const result = await Promise.race([
           plugin.startRecognition({ language: rec.lang || "pt-BR", maxResults: 3 }),
-          ms
-        );
+          new Promise((_, reject) => setTimeout(() => reject({ code: "no-speech", message: "Não ouvi nada" }), 15000))
+        ]);
+        encerrar();
         const alts = ((result && result.alternatives) || []).map((a, i) => ({
           transcript: a.transcript,
           confidence: a.confidence || (i === 0 ? 0.9 : 0.5)
@@ -543,52 +552,24 @@ function createNativeRecognition() {
             results: [Object.assign(alts, { isFinal: true })]
           });
         }
-        encerrar();
         if (rec.onend) rec.onend();
-      };
-      try {
-        await ouvir(12000);
       } catch (err) {
         const code = (err && err.code) || "";
         const msg = (err && err.message) || String(err);
+        encerrar();
         if (code === "not-allowed" || /permiss/i.test(msg)) {
-          let req = null;
-          try {
-            req = await Promise.race([
-              plugin.requestMic(),
-              new Promise(resolve => setTimeout(() => resolve({ granted: false, timeout: true }), 60000))
-            ]);
-          } catch (e2) { req = null; }
-          if (req && req.granted === false) {
-            encerrar();
-            if (req.timeout) {
-              addMessage("hint", "Toque em Permitir na tela do Android para o Sil ouvir você.");
-            }
-            if (rec.onerror) rec.onerror({ error: "not-allowed" });
-            if (rec.onend) rec.onend();
-            return;
-          }
-          try {
-            await ouvir(15000);
-          } catch (err2) {
-            encerrar();
-            const code2 = (err2 && err2.code) || "";
-            const msg2 = (err2 && err2.message) || String(err2);
-            if (code2 !== "no-speech" && !/ouvi|entendi/i.test(msg2)) setStatus("Falha na voz do app: " + msg2, "idle");
-            if (rec.onerror) rec.onerror({ error: "no-speech" });
-            if (rec.onend) rec.onend();
-          }
-        } else if (code === "no-speech" || /ouvi|entendi/i.test(msg)) {
-          encerrar();
-          if (rec.onerror) rec.onerror({ error: "no-speech" });
-          if (rec.onend) rec.onend();
+          semMicrofone();
         } else if (code === "unavailable") {
-          encerrar();
           setStatus("Reconhecimento de voz indisponível neste aparelho. Use o campo de texto.", "idle");
           if (rec.onend) rec.onend();
+        } else if (code === "network") {
+          setStatus("Sem internet para ouvir. Verifique a conexão e tente de novo.", "idle");
+          if (rec.onend) rec.onend();
+        } else if (code !== "no-speech" && !/ouvi|entendi/i.test(msg)) {
+          setStatus("Falha na voz: " + msg, "idle");
+          if (rec.onend) rec.onend();
         } else {
-          encerrar();
-          setStatus("Falha na voz do app: " + msg, "idle");
+          if (rec.onerror) rec.onerror({ error: "no-speech" });
           if (rec.onend) rec.onend();
         }
       }

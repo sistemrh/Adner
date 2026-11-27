@@ -20,7 +20,7 @@ import java.util.ArrayList;
 
 @CapacitorPlugin(
   name = "NotificationListener",
-  permissions = { @Permission(alias = "microfone", strings = { android.Manifest.permission.RECORD_AUDIO }) }
+  permissions = { @Permission(alias = "mic", strings = { android.Manifest.permission.RECORD_AUDIO }) }
 )
 public class NotificationListenerPlugin extends Plugin {
   private static NotificationListenerPlugin instance;
@@ -62,6 +62,9 @@ public class NotificationListenerPlugin extends Plugin {
   public void micStatus(PluginCall call) {
     JSObject ret = new JSObject();
     ret.put("granted", hasMic());
+    ret.put("available", SpeechRecognizer.isRecognitionAvailable(getContext()));
+    ret.put("sdk", android.os.Build.VERSION.SDK_INT);
+    ret.put("pkg", getContext().getPackageName());
     call.resolve(ret);
   }
 
@@ -73,14 +76,23 @@ public class NotificationListenerPlugin extends Plugin {
       call.resolve(ok);
       return;
     }
-    requestPermissionForAlias("microfone", call, "micCallback");
+    requestPermissionForAlias("mic", call, "micResult");
   }
 
   @PermissionCallback
-  private void micCallback(PluginCall call) {
+  private void micResult(PluginCall call) {
     JSObject ret = new JSObject();
     ret.put("granted", hasMic());
     call.resolve(ret);
+  }
+
+  @PluginMethod
+  public void openAppSettings(PluginCall call) {
+    Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+      Uri.fromParts("package", getContext().getPackageName(), null));
+    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+    getContext().startActivity(intent);
+    call.resolve();
   }
 
   @PluginMethod
