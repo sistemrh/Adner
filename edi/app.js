@@ -1,7 +1,7 @@
 const GROQ_API_KEY = "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";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "openai/gpt-oss-120b";
-const APP_VERSION = "v40";
+const APP_VERSION = "v41";
 const WAKE_WORD = "sil";
 const WAKE_VARIANTS = ["sil", "syl", "cil", "cyl", "sill", "sile", "syll", "cill", "siril", "cyril", "siri", "sila", "cecil", "sylla", "cila"];
 
@@ -479,11 +479,9 @@ function startListening() {
 async function appVoiceDiagnostics() {
   try {
     const st = await window.Capacitor.Plugins.NotificationListener.micStatus();
-    const mic = st && st.granted ? "autorizado" : "sem permissão";
-    const voz = st && st.available === false ? "indisponível neste aparelho" : "ok";
-    addMessage("hint", `Microfone: ${mic} · Voz do aparelho: ${voz}`);
+    addMessage("hint", `Mic: ${st.granted ? "autorizado" : "NEGADO"} · Voz: ${st.available === false ? "indisponível" : "ok"} · ${st.pkg} (Android ${st.sdk})`);
   } catch (e) {
-    addMessage("error", "Diagnóstico de voz falhou: " + ((e && e.message) || e));
+    addMessage("error", "Diagnóstico de voz: " + ((e && e.message) || e));
   }
 }
 
@@ -523,25 +521,11 @@ function createNativeRecognition() {
         rec._listening = false;
         if (parciais) { try { parciais.remove(); } catch (e) { /* removido */ } parciais = null; }
       };
-      const semMicrofone = () => {
-        encerrar();
-        plugin.openAppSettings().catch(() => { });
-        addMessage("error", "O Sil precisa do microfone: autorize o Sil na tela de Permissões que abriu e toque no núcleo de novo.");
-        if (rec.onend) rec.onend();
-      };
-      try {
-        let st = null;
-        try { st = await plugin.micStatus(); } catch (e) { st = null; }
-        if (st && st.granted === false) {
-          let req = null;
-          try { req = await plugin.requestMic(); } catch (e2) { req = null; }
-          if (!req || req.granted === false) { semMicrofone(); return; }
-        }
-        const result = await Promise.race([
-          plugin.startRecognition({ language: rec.lang || "pt-BR", maxResults: 3 }),
-          new Promise((_, reject) => setTimeout(() => reject({ code: "no-speech", message: "Não ouvi nada" }), 15000))
-        ]);
-        encerrar();
+      const tentarOuvir = () => Promise.race([
+        plugin.startRecognition({ language: rec.lang || "pt-BR", maxResults: 3 }),
+        new Promise((_, reject) => setTimeout(() => reject({ code: "no-speech", message: "Não ouvi nada" }), 15000))
+      ]);
+      const entregar = (result) => {
         const alts = ((result && result.alternatives) || []).map((a, i) => ({
           transcript: a.transcript,
           confidence: a.confidence || (i === 0 ? 0.9 : 0.5)
@@ -552,26 +536,53 @@ function createNativeRecognition() {
             results: [Object.assign(alts, { isFinal: true })]
           });
         }
-        if (rec.onend) rec.onend();
-      } catch (err) {
+      };
+      const falhou = async (err) => {
         const code = (err && err.code) || "";
         const msg = (err && err.message) || String(err);
         encerrar();
         if (code === "not-allowed" || /permiss/i.test(msg)) {
-          semMicrofone();
-        } else if (code === "unavailable") {
-          setStatus("Reconhecimento de voz indisponível neste aparelho. Use o campo de texto.", "idle");
+          let st = null;
+          try { st = await plugin.micStatus(); } catch (e3) { st = { erro: String((e3 && e3.message) || e3) }; }
+          plugin.openAppSettings().catch(() => { });
+          addMessage("error", "Microfone negado pelo Android. Na tela aberta toque em Permissões → Microfone → Permitir, volte e toque no núcleo. Estado real: " + JSON.stringify(st));
           if (rec.onend) rec.onend();
+          return;
+        }
+        if (code === "unavailable") {
+          setStatus("Reconhecimento de voz indisponível neste aparelho. Use o campo de texto.", "idle");
         } else if (code === "network") {
           setStatus("Sem internet para ouvir. Verifique a conexão e tente de novo.", "idle");
-          if (rec.onend) rec.onend();
         } else if (code !== "no-speech" && !/ouvi|entendi/i.test(msg)) {
           setStatus("Falha na voz: " + msg, "idle");
-          if (rec.onend) rec.onend();
         } else {
           if (rec.onerror) rec.onerror({ error: "no-speech" });
-          if (rec.onend) rec.onend();
         }
+        if (rec.onend) rec.onend();
+      };
+      try {
+        for (let tentativa = 1; tentativa <= 2; tentativa++) {
+          try {
+            const result = await tentarOuvir();
+            encerrar();
+            entregar(result);
+            if (rec.onend) rec.onend();
+            return;
+          } catch (err) {
+            const code = (err && err.code) || "";
+            const msg = (err && err.message) || String(err);
+            if ((code === "not-allowed" || /permiss/i.test(msg)) && tentativa === 1) {
+              try { await plugin.requestMic(); } catch (e2) { /* segue para o diagnóstico */ }
+              continue;
+            }
+            await falhou(err);
+            return;
+          }
+        }
+      } catch (fatal) {
+        encerrar();
+        addMessage("error", "Falha de voz: " + ((fatal && fatal.message) || fatal));
+        if (rec.onend) rec.onend();
       }
     },
     stop() {
