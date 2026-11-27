@@ -1,9 +1,9 @@
 const GROQ_API_KEY = "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";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "openai/gpt-oss-120b";
-const APP_VERSION = "v51";
+const APP_VERSION = "v52";
 const WAKE_WORD = "tiz";
-const WAKE_VARIANTS = ["tiz", "tis", "dis", "tyz", "tizz", "chis", "tiss", "tys", "thys"];
+const WAKE_VARIANTS = ["tiz", "tis", "dis", "tyz", "tizz", "chis", "tiss", "tys", "thys", "tz", "tiche", "tige", "tix", "teez", "tchi"];
 
 const SPEECHIFY_API_KEYS = ["sk_aws5h0bt4k98pf3kz5nfcd1w00w2hqsash8wtxrk5sw"];
 const SPEECHIFY_API_KEY = SPEECHIFY_API_KEYS[0];
@@ -348,7 +348,9 @@ function normalizeWord(word) {
 
 function matchesWake(word) {
   if (!word) return false;
+  if (word.startsWith("tiz")) return true;
   if (WAKE_VARIANTS.includes(word)) return true;
+  if (word.length >= 3 && levenshtein(word, "tiz") <= 1) return true;
   if (word.length >= 4) {
     return WAKE_VARIANTS.some(v => levenshtein(word, v) <= 1);
   }
@@ -471,6 +473,7 @@ function buildBrowserRecognition() {
 }
 
 function startListening() {
+  if (recognition && recognition._listening) return;
   if (NativeSpeechRecognition) {
     recognition = createNativeRecognition();
   } else if (SpeechRecognition) {
@@ -527,7 +530,10 @@ function createNativeRecognition() {
       try {
         parciais = await plugin.addListener("recognitionPartial", (data) => {
           const t = (data && data.transcript) || "";
-          if (t) setStatus(`“${t}”`, "listening");
+          if (t) {
+            pendingInterim = t;
+            setStatus(`“${t}”`, "listening");
+          }
         });
       } catch (e) { parciais = null; }
       const encerrar = () => {
