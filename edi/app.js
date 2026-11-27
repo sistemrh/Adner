@@ -1,7 +1,7 @@
 const GROQ_API_KEY = "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";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "openai/gpt-oss-120b";
-const APP_VERSION = "v59";
+const APP_VERSION = "v61";
 const WAKE_WORD = "tiz";
 const WAKE_VARIANTS = ["tiz", "tis", "dis", "tyz", "tizz", "chis", "tiss", "tys", "thys", "tz", "tiche", "tige", "tix", "teez", "tchi"];
 
@@ -793,42 +793,52 @@ function injectDateTime() {
   history[0] = { role: "system", content: context };
 }
 
+const LLM_PROVIDERS = [
+  { nome: "Groq 1", url: GROQ_API_URL, key: GROQ_API_KEY, model: GROQ_MODEL },
+  { nome: "Mistral", url: "https://api.mistral.ai/v1/chat/completions", key: "mstrl_BaJ8gPotm2iTY6saMyYOipRY8436Sf5H_0SyJuM", model: "mistral-small-latest" }
+];
+let llmAtivo = 0;
+
 async function askGroq() {
   for (let hop = 0; hop < 3; hop++) {
     injectDateTime();
     let data = null;
     let erro = "Falha de conexão.";
-    for (let tentativa = 0; tentativa < 3; tentativa++) {
-      const response = await fetch(GROQ_API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer " + GROQ_API_KEY
-        },
-        body: JSON.stringify({
-          model: GROQ_MODEL,
-          messages: history,
-          tools: TOOLS,
-          temperature: 0.6,
-          max_tokens: 300
-        })
-      });
-      if (response.ok) {
-        data = await response.json();
-        break;
-      }
-      erro = response.status + " " + response.statusText;
+    for (let tentativa = 0; tentativa < LLM_PROVIDERS.length + 1; tentativa++) {
+      const provedor = LLM_PROVIDERS[(llmAtivo + tentativa) % LLM_PROVIDERS.length];
       try {
-        const detalhe = await response.json();
-        if (detalhe.error && detalhe.error.message) erro = detalhe.error.message.split(".")[0];
-      } catch (e) { /* mantém o status */ }
-      if (response.status === 429 || response.status >= 500) {
-        await new Promise(r => setTimeout(r, 2500 + tentativa * 2500));
-        continue;
+        const response = await fetch(provedor.url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + provedor.key
+          },
+          body: JSON.stringify({
+            model: provedor.model,
+            messages: history,
+            tools: TOOLS,
+            temperature: 0.6,
+            max_tokens: 300
+          })
+        });
+        if (response.ok) {
+          data = await response.json();
+          llmAtivo = LLM_PROVIDERS.indexOf(provedor);
+          break;
+        }
+        erro = response.status + " " + response.statusText;
+        try {
+          const detalhe = await response.json();
+          if (detalhe.error && detalhe.error.message) erro = detalhe.error.message.split(".")[0];
+        } catch (e) { /* mantém o status */ }
+      } catch (e) {
+        erro = (e && e.message) || erro;
       }
-      throw new Error(erro);
+      if (tentativa < LLM_PROVIDERS.length) {
+        await new Promise(r => setTimeout(r, 2500));
+      }
     }
-    if (!data) throw new Error(erro || "Groq ocupado; tente de novo em instantes.");
+    if (!data) throw new Error(erro || "Nenhum cérebro disponível agora; tente de novo em instantes.");
 
     const message = data.choices && data.choices[0] && data.choices[0].message;
     if (!message) return "Não consegui formular uma resposta.";
