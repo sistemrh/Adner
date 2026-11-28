@@ -3,11 +3,12 @@ const GROQ_MODEL = "openai/gpt-oss-120b";
 const MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions";
 const MISTRAL_MODEL = "mistral-small-latest";
 const CONFIG_TABLE = "config";
-const APP_VERSION = "v63";
+const APP_VERSION = "v64";
 const WAKE_WORD = "tiz";
 const WAKE_VARIANTS = ["tiz", "tis", "dis", "tyz", "tizz", "chis", "tiss", "tys", "thys", "tz", "tiche", "tige", "tix", "teez", "tchi"];
 
 let SPEECHIFY_API_KEYS = [];
+let SERPAPI_KEY = "";
 const SPEECHIFY_URL = "https://api.speechify.ai/v1/audio/stream";
 const SPEECHIFY_VOICES_URL = "https://api.speechify.ai/v1/voices";
 const SPEECHIFY_MODELS = ["simba-3.0", "simba-3.2"];
@@ -49,6 +50,7 @@ const SYSTEM_PROMPT = [
   "Para perguntas sobre o tempo, use a ferramenta get_weather. Se não souberem a cidade, pergunte apenas qual cidade.",
   "Quando Claudio pedir para ver ou ler as mensagens do WhatsApp, use a ferramenta get_messages e diga quem mandou e o que disseram.",
   "Para fazer uma ligação, use a ferramenta dial_phone com o número; se o número não estiver na memória, pergunte antes e sugira tomar nota para as próximas vezes.",
+  "Para perguntas sobre fatos, pessoas, lugares, empresas ou assuntos atuais que você não sabe com certeza, use a ferramenta search_web para pesquisar no Google e responda com base no resultado, dizendo a fonte em poucas palavras. Se a busca não trouxer nada útil, diga que não encontrou, sem inventar.",
   "Para perguntas sobre rota, distância ou tempo de viagem até um lugar, use a ferramenta get_route: informe a distância em quilômetros e o tempo estimado de carro em linguagem falada; use abrir=true somente quando o Claudio pedir para abrir ou traçar no GPS.",
   "Para notícias, use a ferramenta get_news e faça um resumo falado das principais: agrupe os assuntos mais relevantes em poucas frases naturais, sem listar uma por uma, e cite a fonte quando fizer sentido.",
   "Você sabe a data e a hora atuais porque elas são informadas neste prompt. Use-as sem hesitar."
@@ -251,6 +253,20 @@ const TOOLS = [
           abrir: { type: "boolean", description: "True para abrir a rota no GPS do celular" }
         },
         required: ["destino"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "search_web",
+      description: "Pesquisa no Google fatos, pessoas, lugares, empresas e assuntos atuais que não constam na memória",
+      parameters: {
+        type: "object",
+        properties: {
+          consulta: { type: "string", description: "O que pesquisar, em português, ex.: quem é o prefeito de Recife" }
+        },
+        required: ["consulta"]
       }
     }
   },
@@ -825,6 +841,8 @@ async function carregarChaves() {
     LLM_PROVIDERS = construirProvedores(config);
     const fala = config.find(item => item.chave === "speechify");
     SPEECHIFY_API_KEYS = fala ? fala.valor.split(",").map(k => k.trim()).filter(Boolean) : [];
+    const busca = config.find(item => item.chave === "serpapi");
+    SERPAPI_KEY = busca ? busca.valor.trim() : "";
     if (!LLM_PROVIDERS.length) addMessage("error", "Nenhuma chave de inteligência no Supabase (tabela config).");
   } catch (e) {
     addMessage("error", "Não consegui ler as chaves no Supabase: " + ((e && e.message) || e));
@@ -892,6 +910,8 @@ async function askGroq() {
             result = JSON.stringify(await getWeather(args.cidade || ""));
           } else if (call.function.name === "get_news") {
             result = JSON.stringify(await getNews(args.assunto || ""));
+          } else if (call.function.name === "search_web") {
+            result = JSON.stringify(await searchWeb(args.consulta || ""));
           } else if (call.function.name === "get_route") {
             result = JSON.stringify(await getRoute(args.destino || "", args.origem || "", !!args.abrir));
           } else if (call.function.name === "get_messages") {
@@ -1088,6 +1108,40 @@ async function getRoute(destino, origem, abrir) {
   } catch (e) {
     return { erro: (e && e.message) || "Falha ao calcular a rota." };
   }
+}
+
+function dominioDe(url) {
+  try { return new URL(url).hostname.replace(/^www\./, ""); } catch (e) { return "web"; }
+}
+
+async function searchWeb(consulta) {
+  if (!consulta) return { erro: "Busca vazia." };
+  await aguardarChaves();
+  if (!SERPAPI_KEY) return { erro: "Pesquisa na web ainda não configurada no Supabase." };
+  const alvo = "https://serpapi.com/search.json?engine=google&num=5&hl=pt-BR&gl=br&q=" + encodeURIComponent(consulta) + "&api_key=" + SERPAPI_KEY;
+  const caminhos = [
+    alvo,
+    "https://api.allorigins.win/raw?url=" + encodeURIComponent(alvo),
+    "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(alvo)
+  ];
+  for (const caminho of caminhos) {
+    try {
+      const response = await fetch(caminho);
+      if (!response.ok) throw new Error(String(response.status));
+      const data = await response.json();
+      const organic = data.organic_results || [];
+      if (!organic.length) continue;
+      return {
+        consulta: consulta,
+        resultados: organic.slice(0, 5).map(r => ({
+          titulo: r.title || "",
+          resumo: (r.snippet || "").replace(/\s+/g, " ").trim(),
+          fonte: dominioDe(r.link || "")
+        }))
+      };
+    } catch (e) { /* tenta o próximo caminho */ }
+  }
+  return { erro: "Não encontrei resultados úteis nessa busca." };
 }
 
 function cleanReply(text) {
