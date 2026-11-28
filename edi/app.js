@@ -3,7 +3,7 @@ const GROQ_MODEL = "openai/gpt-oss-120b";
 const MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions";
 const MISTRAL_MODEL = "mistral-small-latest";
 const CONFIG_TABLE = "config";
-const APP_VERSION = "v64";
+const APP_VERSION = "v65";
 const WAKE_WORD = "tiz";
 const WAKE_VARIANTS = ["tiz", "tis", "dis", "tyz", "tizz", "chis", "tiss", "tys", "thys", "tz", "tiche", "tige", "tix", "teez", "tchi"];
 
@@ -50,6 +50,7 @@ const SYSTEM_PROMPT = [
   "Para perguntas sobre o tempo, use a ferramenta get_weather. Se não souberem a cidade, pergunte apenas qual cidade.",
   "Quando Claudio pedir para ver ou ler as mensagens do WhatsApp, use a ferramenta get_messages e diga quem mandou e o que disseram.",
   "Para fazer uma ligação, use a ferramenta dial_phone com o número; se o número não estiver na memória, pergunte antes e sugira tomar nota para as próximas vezes.",
+  "Você enxerga pela câmera do celular. Quando o Claudio perguntar quem está presente, o que você vê ou quem é alguém, use a ferramenta ver_pessoas e diga os nomes reconhecidos de forma natural. Quando ele pedir para aprender, gravar ou apontar quem é uma pessoa (ex.: aprenda essa pessoa como Roseane), use a ferramenta aprender_pessoa com o nome e confirme em uma frase curta.",
   "Para perguntas sobre fatos, pessoas, lugares, empresas ou assuntos atuais que você não sabe com certeza, use a ferramenta search_web para pesquisar no Google e responda com base no resultado, dizendo a fonte em poucas palavras. Se a busca não trouxer nada útil, diga que não encontrou, sem inventar.",
   "Para perguntas sobre rota, distância ou tempo de viagem até um lugar, use a ferramenta get_route: informe a distância em quilômetros e o tempo estimado de carro em linguagem falada; use abrir=true somente quando o Claudio pedir para abrir ou traçar no GPS.",
   "Para notícias, use a ferramenta get_news e faça um resumo falado das principais: agrupe os assuntos mais relevantes em poucas frases naturais, sem listar uma por uma, e cite a fonte quando fizer sentido.",
@@ -267,6 +268,28 @@ const TOOLS = [
           consulta: { type: "string", description: "O que pesquisar, em português, ex.: quem é o prefeito de Recife" }
         },
         required: ["consulta"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "ver_pessoas",
+      description: "Olha pela câmera do celular e diz quem está presente, reconhecendo rostos de pessoas já ensinadas",
+      parameters: { type: "object", properties: {} }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "aprender_pessoa",
+      description: "Grava o rosto de uma pessoa pela câmera para reconhecê-la no futuro",
+      parameters: {
+        type: "object",
+        properties: {
+          nome: { type: "string", description: "Nome da pessoa, ex.: Roseane" }
+        },
+        required: ["nome"]
       }
     }
   },
@@ -912,6 +935,10 @@ async function askGroq() {
             result = JSON.stringify(await getNews(args.assunto || ""));
           } else if (call.function.name === "search_web") {
             result = JSON.stringify(await searchWeb(args.consulta || ""));
+          } else if (call.function.name === "ver_pessoas") {
+            result = JSON.stringify(await verPessoas());
+          } else if (call.function.name === "aprender_pessoa") {
+            result = JSON.stringify(await aprenderPessoa((args.nome || "").trim()));
           } else if (call.function.name === "get_route") {
             result = JSON.stringify(await getRoute(args.destino || "", args.origem || "", !!args.abrir));
           } else if (call.function.name === "get_messages") {
@@ -1142,6 +1169,162 @@ async function searchWeb(consulta) {
     } catch (e) { /* tenta o próximo caminho */ }
   }
   return { erro: "Não encontrei resultados úteis nessa busca." };
+}
+
+const FACE_API_URL = "https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.15/dist/face-api.js";
+const FACE_MODELS_URL = "https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.15/model/";
+const PESSOAS_TABLE = "pessoas";
+const FACE_LIMIAR = 0.55;
+
+let faceApiPronta = null;
+let pessoasCache = null;
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const tag = document.createElement("script");
+    tag.src = src;
+    tag.onload = resolve;
+    tag.onerror = () => reject(new Error("Falha ao carregar o módulo de visão"));
+    document.head.appendChild(tag);
+  });
+}
+
+function carregarFaceApi() {
+  if (faceApiPronta) return faceApiPronta;
+  faceApiPronta = (async () => {
+    await loadScript(FACE_API_URL);
+    await faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODELS_URL);
+    await faceapi.nets.faceLandmark68Net.loadFromUri(FACE_MODELS_URL);
+    await faceapi.nets.faceRecognitionNet.loadFromUri(FACE_MODELS_URL);
+    return true;
+  })();
+  faceApiPronta.catch(() => { faceApiPronta = null; });
+  return faceApiPronta;
+}
+
+async function abrirCamera() {
+  const video = document.getElementById("camera-view");
+  const tentar = () => navigator.mediaDevices.getUserMedia({
+    video: { facingMode: "user", width: { ideal: 480 }, height: { ideal: 360 } },
+    audio: false
+  });
+  let stream = null;
+  try {
+    stream = await tentar();
+  } catch (e) {
+    const plugin = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NotificationListener;
+    if (plugin && plugin.requestCamera) {
+      const r = await plugin.requestCamera();
+      if (!r || !r.granted) throw new Error("Permissão de câmera negada.");
+      stream = await tentar();
+    } else {
+      throw e;
+    }
+  }
+  video.srcObject = stream;
+  await video.play().catch(() => { });
+  return stream;
+}
+
+function fecharCamera(stream) {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  const video = document.getElementById("camera-view");
+  if (video) video.srcObject = null;
+}
+
+async function coletarRostos(segundos, maximo) {
+  const video = document.getElementById("camera-view");
+  const opcoes = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 });
+  const descritores = [];
+  const fim = Date.now() + segundos * 1000;
+  while (Date.now() < fim && descritores.length < maximo) {
+    try {
+      const detectados = await faceapi
+        .detectAllFaces(video, opcoes)
+        .withFaceLandmarks()
+        .withFaceDescriptors();
+      for (const d of detectados) descritores.push(Array.from(d.descriptor));
+    } catch (e) { /* segue tentando */ }
+    await new Promise(r => setTimeout(r, 400));
+  }
+  return descritores;
+}
+
+async function carregarPessoas() {
+  try {
+    const response = await supabaseRequest(`${PESSOAS_TABLE}?select=nome,vetor&order=criado_em.asc`);
+    pessoasCache = await response.json();
+  } catch (e) {
+    pessoasCache = null;
+  }
+  return pessoasCache || [];
+}
+
+function distanciaVetorial(a, b) {
+  let soma = 0;
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    const d = a[i] - b[i];
+    soma += d * d;
+  }
+  return Math.sqrt(soma);
+}
+
+async function aprenderPessoa(nome) {
+  if (!nome) return { erro: "Nome não informado. Diga, por exemplo: aprenda essa pessoa como Roseane." };
+  try {
+    setStatus("Olhando… mantenha o rosto visível.", "listening");
+    await carregarFaceApi();
+    const stream = await abrirCamera();
+    const descritores = await coletarRostos(6, 10);
+    fecharCamera(stream);
+    if (descritores.length < 3) {
+      return { erro: "Não consegui ver o rosto direito. Aproxime o rosto da câmera com boa luz e repita." };
+    }
+    const vetor = new Array(128).fill(0);
+    for (const d of descritores) {
+      for (let i = 0; i < 128; i++) vetor[i] += d[i] / descritores.length;
+    }
+    await supabaseRequest(PESSOAS_TABLE, {
+      method: "POST",
+      headers: { "Prefer": "return=minimal" },
+      body: JSON.stringify({ nome: nome, vetor: vetor })
+    });
+    pessoasCache = null;
+    return { ok: true, nome: nome, amostras: descritores.length };
+  } catch (e) {
+    return { erro: (e && e.message) || "Falha ao olhar pela câmera." };
+  }
+}
+
+async function verPessoas() {
+  try {
+    setStatus("Olhando…", "listening");
+    await carregarFaceApi();
+    const conhecidas = await carregarPessoas();
+    const stream = await abrirCamera();
+    const descritores = await coletarRostos(4, 6);
+    fecharCamera(stream);
+    if (!descritores.length) {
+      return { aviso: "Nenhum rosto visível agora." };
+    }
+    const vistos = [];
+    for (const d of descritores) {
+      let nome = null;
+      let melhor = FACE_LIMIAR;
+      for (const p of conhecidas) {
+        const dist = distanciaVetorial(d, p.vetor || []);
+        if (dist < melhor) {
+          melhor = dist;
+          nome = p.nome;
+        }
+      }
+      vistos.push(nome || "alguém que não conheço");
+    }
+    return { pessoas: vistos, conhecidas_cadastradas: conhecidas.length };
+  } catch (e) {
+    return { erro: (e && e.message) || "Falha ao olhar pela câmera." };
+  }
 }
 
 function cleanReply(text) {

@@ -337,3 +337,13 @@ h1 {
   color: var(--muted);
   margin-bottom: 4px;
 }
+
+#camera-view {
+  position: fixed;
+  top: -20px;
+  left: -20px;
+  width: 4px;
+  height: 4px;
+  opacity: 0.01;
+  pointer-events: none;
+}

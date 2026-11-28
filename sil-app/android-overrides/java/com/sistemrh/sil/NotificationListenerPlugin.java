@@ -20,7 +20,10 @@ import java.util.ArrayList;
 
 @CapacitorPlugin(
   name = "NotificationListener",
-  permissions = { @Permission(alias = "mic", strings = { android.Manifest.permission.RECORD_AUDIO }) }
+  permissions = {
+    @Permission(alias = "mic", strings = { android.Manifest.permission.RECORD_AUDIO }),
+    @Permission(alias = "camera", strings = { android.Manifest.permission.CAMERA })
+  }
 )
 public class NotificationListenerPlugin extends Plugin {
   private static NotificationListenerPlugin instance;
@@ -83,6 +86,30 @@ public class NotificationListenerPlugin extends Plugin {
   private void micResult(PluginCall call) {
     JSObject ret = new JSObject();
     ret.put("granted", hasMic());
+    call.resolve(ret);
+  }
+
+  private boolean hasCamera() {
+    return android.os.Build.VERSION.SDK_INT < 23
+      || getContext().checkSelfPermission(android.Manifest.permission.CAMERA)
+           == android.content.pm.PackageManager.PERMISSION_GRANTED;
+  }
+
+  @PluginMethod
+  public void requestCamera(final PluginCall call) {
+    if (hasCamera()) {
+      JSObject ok = new JSObject();
+      ok.put("granted", true);
+      call.resolve(ok);
+      return;
+    }
+    requestPermissionForAlias("camera", call, "cameraResult");
+  }
+
+  @PermissionCallback
+  private void cameraResult(PluginCall call) {
+    JSObject ret = new JSObject();
+    ret.put("granted", hasCamera());
     call.resolve(ret);
   }
 
