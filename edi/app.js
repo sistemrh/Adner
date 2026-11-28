@@ -3,14 +3,14 @@ const GROQ_MODEL = "openai/gpt-oss-120b";
 const MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions";
 const MISTRAL_MODEL = "mistral-small-latest";
 const CONFIG_TABLE = "config";
-const APP_VERSION = "v62";
+const APP_VERSION = "v63";
 const WAKE_WORD = "tiz";
 const WAKE_VARIANTS = ["tiz", "tis", "dis", "tyz", "tizz", "chis", "tiss", "tys", "thys", "tz", "tiche", "tige", "tix", "teez", "tchi"];
 
 let SPEECHIFY_API_KEYS = [];
 const SPEECHIFY_URL = "https://api.speechify.ai/v1/audio/stream";
 const SPEECHIFY_VOICES_URL = "https://api.speechify.ai/v1/voices";
-const SPEECHIFY_MODELS = ["simba-multilingual", "simba-3.2", "simba-3.0", "simba-english"];
+const SPEECHIFY_MODELS = ["simba-3.0", "simba-3.2"];
 const SPEECHIFY_VOICE_NAME = "caio";
 const SPEECHIFY_FALLBACK_VOICE = "geffen_32";
 const MAX_CHUNK = 900;
@@ -392,6 +392,10 @@ function extractCommand(alternatives) {
 }
 
 async function discoverSpeechifyVoice() {
+  if (!SPEECHIFY_API_KEYS.length) {
+    speechifyVoiceId = "";
+    return;
+  }
   const variants = [
     "?type=shared&locale=pt-BR&limit=200",
     "?type=shared&locale=pt&limit=200",
@@ -1140,6 +1144,7 @@ function splitIntoChunks(text) {
 
 async function speak(text) {
   const session = ++speakSession;
+  await aguardarChaves();
   const chunks = splitIntoChunks(normalizeForSpeech(text));
   orb.classList.remove("thinking");
   orb.classList.add("speaking");
@@ -1162,7 +1167,7 @@ async function speak(text) {
 
 async function speakWithSpeechify(text, session) {
   if (!speechifyVoiceId) await discoverSpeechifyVoice();
-  const models = [speechifyModel, ...SPEECHIFY_MODELS].filter((m, i, arr) => m && arr.indexOf(m) === i);
+  const models = [...SPEECHIFY_MODELS, speechifyModel].filter((m, i, arr) => m && arr.indexOf(m) === i);
   try {
     for (let offset = 0; offset < SPEECHIFY_API_KEYS.length; offset++) {
       const keyIndex = (speechifyKeyIndex + offset) % SPEECHIFY_API_KEYS.length;
