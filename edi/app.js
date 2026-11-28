@@ -3,7 +3,7 @@ const GROQ_MODEL = "openai/gpt-oss-120b";
 const MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions";
 const MISTRAL_MODEL = "mistral-small-latest";
 const CONFIG_TABLE = "config";
-const APP_VERSION = "v66";
+const APP_VERSION = "v67";
 const WAKE_WORD = "tiz";
 const WAKE_VARIANTS = ["tiz", "tis", "dis", "tyz", "tizz", "chis", "tiss", "tys", "thys", "tz", "tiche", "tige", "tix", "teez", "tchi"];
 
@@ -482,12 +482,27 @@ function handleVoiceResult(event) {
     }
   }
   if (finalText.trim()) {
+    if (silencioTimer) { clearTimeout(silencioTimer); silencioTimer = null; }
     pendingInterim = "";
     handleUtterance(finalText.trim(), true, confidence, alternatives);
   } else if (interimText.trim()) {
     pendingInterim = interimText.trim();
     setStatus(`“${pendingInterim}”`, "listening");
+    programarProcessamentoPausa();
   }
+}
+
+let silencioTimer = null;
+
+function programarProcessamentoPausa() {
+  if (silencioTimer) clearTimeout(silencioTimer);
+  silencioTimer = setTimeout(() => {
+    silencioTimer = null;
+    const t = pendingInterim;
+    if (!t || busy) return;
+    pendingInterim = "";
+    handleUtterance(t, true, 0, [t]);
+  }, 1300);
 }
 
 function handleVoiceError(event) {
@@ -504,6 +519,7 @@ function handleVoiceError(event) {
 }
 
 function handleVoiceEnd() {
+  if (silencioTimer) { clearTimeout(silencioTimer); silencioTimer = null; }
   if (!busy) orb.classList.remove("listening");
   const aproximado = pendingInterim;
   pendingInterim = "";
@@ -881,6 +897,11 @@ function aguardarChaves() {
 const FUNCOES_URL = SUPABASE_URL + "/functions/v1/tiz/";
 
 async function chamarFuncao(acao, corpo, tipoAceito) {
+  if (!funcaoTizAtiva) {
+    if (Date.now() - funcaoTizDesde < 600000) throw new Error("função indisponível");
+    funcaoTizAtiva = true;
+    funcaoTizFalhas = 0;
+  }
   const response = await fetch(FUNCOES_URL + acao, {
     method: "POST",
     headers: {
@@ -890,7 +911,18 @@ async function chamarFuncao(acao, corpo, tipoAceito) {
     },
     body: JSON.stringify(corpo || {})
   });
-  if (!response.ok) throw new Error("função " + response.status);
+  if (!response.ok) {
+    if (response.status === 404) {
+      funcaoTizFalhas++;
+      if (funcaoTizFalhas >= 2) {
+        funcaoTizAtiva = false;
+        funcaoTizDesde = Date.now();
+      }
+    }
+    throw new Error("função " + response.status);
+  }
+  funcaoTizAtiva = true;
+  funcaoTizFalhas = 0;
   const tipo = response.headers.get("Content-Type") || "";
   if (tipoAceito === "audio") {
     if (!tipo.includes("audio")) throw new Error("voz indisponível");
@@ -912,7 +944,8 @@ async function askGroq() {
         messages: history,
         tools: TOOLS,
         temperature: 0.6,
-        max_tokens: 300
+        max_tokens: 300,
+        reasoning_effort: "low"
       });
     } catch (e) { /* sem função ainda: usa as chaves diretas */ }
     for (let tentativa = 0; !data && tentativa < LLM_PROVIDERS.length + 1; tentativa++) {
@@ -929,7 +962,8 @@ async function askGroq() {
             messages: history,
             tools: TOOLS,
             temperature: 0.6,
-            max_tokens: 300
+            max_tokens: 300,
+            ...(provedor.nome.indexOf("Mistral") === -1 ? { reasoning_effort: "low" } : {})
           })
         });
         if (response.ok) {
@@ -997,7 +1031,7 @@ async function askGroq() {
       continue;
     }
 
-    return cleanReply(message.content ? message.content.trim() : "Não consegui formular uma resposta.");
+    return cleanReply(message.content ? message.content.trim() : "") || "Não consegui formular uma resposta agora, senhor.";
   }
   return "Não consegui concluir a consulta.";
 }
@@ -1417,6 +1451,7 @@ function splitIntoChunks(text) {
 }
 
 async function speak(text) {
+  if (!text || !text.trim()) return;
   const session = ++speakSession;
   await aguardarChaves();
   const chunks = splitIntoChunks(normalizeForSpeech(text));

@@ -65,10 +65,11 @@ async function chat(corpo: Record<string, unknown>) {
   const chaveMistral = (Deno.env.get("MISTRAL_KEY") || "").trim();
   if (chaveMistral) {
     try {
+      const { reasoning_effort: _re, ...resto } = corpo;
       const r = await fetch(MISTRAL_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": "Bearer " + chaveMistral },
-        body: JSON.stringify({ ...corpo, model: Deno.env.get("MISTRAL_MODEL") || "mistral-small-latest" }),
+        body: JSON.stringify({ ...resto, model: Deno.env.get("MISTRAL_MODEL") || "mistral-small-latest" }),
       });
       if (r.ok) return json(await r.json());
       ultimoErro += " | mistral " + r.status;
