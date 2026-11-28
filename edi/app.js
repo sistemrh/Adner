@@ -3,7 +3,7 @@ const GROQ_MODEL = "openai/gpt-oss-120b";
 const MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions";
 const MISTRAL_MODEL = "mistral-small-latest";
 const CONFIG_TABLE = "config";
-const APP_VERSION = "v67";
+const APP_VERSION = "v68";
 const WAKE_WORD = "tiz";
 const WAKE_VARIANTS = ["tiz", "tis", "dis", "tyz", "tizz", "chis", "tiss", "tys", "thys", "tz", "tiche", "tige", "tix", "teez", "tchi"];
 
@@ -50,6 +50,7 @@ const SYSTEM_PROMPT = [
   "Para perguntas sobre o tempo, use a ferramenta get_weather. Se não souberem a cidade, pergunte apenas qual cidade.",
   "Quando Claudio pedir para ver ou ler as mensagens do WhatsApp, use a ferramenta get_messages e diga quem mandou e o que disseram.",
   "Para fazer uma ligação, use a ferramenta dial_phone com o número; se o número não estiver na memória, pergunte antes e sugira tomar nota para as próximas vezes.",
+  "Quando o Claudio perguntar onde estamos, onde ele está, qual é essa rua ou em que cidade, use a ferramenta onde_estou e diga rua, bairro e cidade em uma frase natural, sem ler coordenadas.",
   "Você enxerga pela câmera do celular. Quando o Claudio perguntar quem está presente, o que você vê ou quem é alguém, use a ferramenta ver_pessoas e diga os nomes reconhecidos de forma natural. Quando ele pedir para aprender, gravar ou apontar quem é uma pessoa (ex.: aprenda essa pessoa como Roseane), use a ferramenta aprender_pessoa com o nome e confirme em uma frase curta.",
   "Para perguntas sobre fatos, pessoas, lugares, empresas ou assuntos atuais que você não sabe com certeza, use a ferramenta search_web para pesquisar no Google e responda com base no resultado, dizendo a fonte em poucas palavras. Se a busca não trouxer nada útil, diga que não encontrou, sem inventar.",
   "Para perguntas sobre rota, distância ou tempo de viagem até um lugar, use a ferramenta get_route: informe a distância em quilômetros e o tempo estimado de carro em linguagem falada; use abrir=true somente quando o Claudio pedir para abrir ou traçar no GPS.",
@@ -269,6 +270,14 @@ const TOOLS = [
         },
         required: ["consulta"]
       }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "onde_estou",
+      description: "Descobre o lugar atual pelo GPS do celular: rua, bairro e cidade",
+      parameters: { type: "object", properties: {} }
     }
   },
   {
@@ -1000,6 +1009,8 @@ async function askGroq() {
             result = JSON.stringify(await getNews(args.assunto || ""));
           } else if (call.function.name === "search_web") {
             result = JSON.stringify(await searchWeb(args.consulta || ""));
+          } else if (call.function.name === "onde_estou") {
+            result = JSON.stringify(await ondeEstou());
           } else if (call.function.name === "ver_pessoas") {
             result = JSON.stringify(await verPessoas());
           } else if (call.function.name === "aprender_pessoa") {
@@ -1160,6 +1171,52 @@ async function geocodeAddress(endereco) {
   const lista = await response.json();
   if (!lista || !lista.length) throw new Error("endereço não encontrado");
   return { lat: parseFloat(lista[0].lat), lon: parseFloat(lista[0].lon), nome: lista[0].display_name };
+}
+
+function obterCoordenadas() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) return reject(new Error("GPS indisponível neste aparelho."));
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+      (err) => reject(new Error(err && err.code === 1 ? "Permissão de localização negada." : "Não consegui obter o GPS agora.")),
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 }
+    );
+  });
+}
+
+async function pedirPermissaoLocalizacao() {
+  const plugin = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NotificationListener;
+  if (plugin && plugin.requestLocation) {
+    const r = await plugin.requestLocation();
+    return !!(r && r.granted);
+  }
+  return false;
+}
+
+async function ondeEstou() {
+  try {
+    setStatus("Descobrindo onde estamos…", "thinking");
+    let pos = null;
+    try {
+      pos = await obterCoordenadas();
+    } catch (e) {
+      if (await pedirPermissaoLocalizacao()) pos = await obterCoordenadas();
+      else throw e;
+    }
+    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&accept-language=pt-BR&lat=${pos.lat}&lon=${pos.lon}`;
+    const response = await fetch(url, { headers: { "Accept": "application/json" } });
+    if (!response.ok) throw new Error("geocoder " + response.status);
+    const dados = await response.json();
+    const end = dados.address || {};
+    const rua = end.road || end.pedestrian || "";
+    const bairro = end.suburb || end.neighbourhood || end.quarter || "";
+    const cidade = end.city || end.town || end.village || end.municipality || "";
+    const estado = end.state || "";
+    if (!rua && !bairro && !cidade) return { aviso: "Não consegui identificar o lugar com precisão." };
+    return { rua: rua, bairro: bairro, cidade: cidade, estado: estado };
+  } catch (e) {
+    return { erro: (e && e.message) || "Falha ao obter a localização." };
+  }
 }
 
 function obterPosicaoAtual() {

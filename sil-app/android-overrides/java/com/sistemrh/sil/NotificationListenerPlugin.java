@@ -22,7 +22,8 @@ import java.util.ArrayList;
   name = "NotificationListener",
   permissions = {
     @Permission(alias = "mic", strings = { android.Manifest.permission.RECORD_AUDIO }),
-    @Permission(alias = "camera", strings = { android.Manifest.permission.CAMERA })
+    @Permission(alias = "camera", strings = { android.Manifest.permission.CAMERA }),
+    @Permission(alias = "location", strings = { android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION })
   }
 )
 public class NotificationListenerPlugin extends Plugin {
@@ -110,6 +111,30 @@ public class NotificationListenerPlugin extends Plugin {
   private void cameraResult(PluginCall call) {
     JSObject ret = new JSObject();
     ret.put("granted", hasCamera());
+    call.resolve(ret);
+  }
+
+  private boolean hasLocation() {
+    return android.os.Build.VERSION.SDK_INT < 23
+      || getContext().checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)
+           == android.content.pm.PackageManager.PERMISSION_GRANTED;
+  }
+
+  @PluginMethod
+  public void requestLocation(final PluginCall call) {
+    if (hasLocation()) {
+      JSObject ok = new JSObject();
+      ok.put("granted", true);
+      call.resolve(ok);
+      return;
+    }
+    requestPermissionForAlias("location", call, "locationResult");
+  }
+
+  @PermissionCallback
+  private void locationResult(PluginCall call) {
+    JSObject ret = new JSObject();
+    ret.put("granted", hasLocation());
     call.resolve(ret);
   }
 
