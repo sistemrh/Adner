@@ -3,7 +3,7 @@ const GROQ_MODEL = "openai/gpt-oss-120b";
 const MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions";
 const MISTRAL_MODEL = "mistral-small-latest";
 const CONFIG_TABLE = "config";
-const APP_VERSION = "v65";
+const APP_VERSION = "v66";
 const WAKE_WORD = "tiz";
 const WAKE_VARIANTS = ["tiz", "tis", "dis", "tyz", "tizz", "chis", "tiss", "tys", "thys", "tz", "tiche", "tige", "tix", "teez", "tchi"];
 
@@ -878,13 +878,44 @@ function aguardarChaves() {
   return chavesProntas;
 }
 
+const FUNCOES_URL = SUPABASE_URL + "/functions/v1/tiz/";
+
+async function chamarFuncao(acao, corpo, tipoAceito) {
+  const response = await fetch(FUNCOES_URL + acao, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "apikey": SUPABASE_KEY,
+      "Authorization": "Bearer " + SUPABASE_KEY
+    },
+    body: JSON.stringify(corpo || {})
+  });
+  if (!response.ok) throw new Error("função " + response.status);
+  const tipo = response.headers.get("Content-Type") || "";
+  if (tipoAceito === "audio") {
+    if (!tipo.includes("audio")) throw new Error("voz indisponível");
+    return response;
+  }
+  const data = await response.json();
+  if (data && data.error) throw new Error(String(data.error));
+  return data;
+}
+
 async function askGroq() {
   await aguardarChaves();
   for (let hop = 0; hop < 3; hop++) {
     injectDateTime();
     let data = null;
     let erro = "Falha de conexão.";
-    for (let tentativa = 0; tentativa < LLM_PROVIDERS.length + 1; tentativa++) {
+    try {
+      data = await chamarFuncao("chat", {
+        messages: history,
+        tools: TOOLS,
+        temperature: 0.6,
+        max_tokens: 300
+      });
+    } catch (e) { /* sem função ainda: usa as chaves diretas */ }
+    for (let tentativa = 0; !data && tentativa < LLM_PROVIDERS.length + 1; tentativa++) {
       const provedor = LLM_PROVIDERS[(llmAtivo + tentativa) % LLM_PROVIDERS.length];
       try {
         const response = await fetch(provedor.url, {
@@ -1145,6 +1176,12 @@ async function searchWeb(consulta) {
   if (!consulta) return { erro: "Busca vazia." };
   await aguardarChaves();
   if (!SERPAPI_KEY) return { erro: "Pesquisa na web ainda não configurada no Supabase." };
+  try {
+    const data = await chamarFuncao("busca", { q: consulta });
+    if (data && data.resultados && data.resultados.length) {
+      return { consulta: consulta, resultados: data.resultados };
+    }
+  } catch (e) { /* sem função ainda: usa a chave direta */ }
   const alvo = "https://serpapi.com/search.json?engine=google&num=5&hl=pt-BR&gl=br&q=" + encodeURIComponent(consulta) + "&api_key=" + SERPAPI_KEY;
   const caminhos = [
     alvo,
@@ -1405,6 +1442,15 @@ async function speak(text) {
 async function speakWithSpeechify(text, session) {
   if (!speechifyVoiceId) await discoverSpeechifyVoice();
   const models = [...SPEECHIFY_MODELS, speechifyModel].filter((m, i, arr) => m && arr.indexOf(m) === i);
+  try {
+    const respostaFuncao = await chamarFuncao("voz", {
+      input: text,
+      voice_id: speechifyVoiceId,
+      model: speechifyModel
+    }, "audio");
+    const blob = await respostaFuncao.blob();
+    return await playBlob(blob, session);
+  } catch (e) { /* sem função ainda: usa as chaves diretas */ }
   try {
     for (let offset = 0; offset < SPEECHIFY_API_KEYS.length; offset++) {
       const keyIndex = (speechifyKeyIndex + offset) % SPEECHIFY_API_KEYS.length;
